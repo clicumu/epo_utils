@@ -44,5 +44,3 @@ class ExchangeDocument:
             return re.sub(r'<.*>', '', text)
         else:
             return text
-
-
