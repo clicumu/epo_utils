@@ -3,7 +3,7 @@ from epo_ops import middlewares
 from epo_ops import models
 from bs4 import BeautifulSoup
 
-from epo_utils.api import documents
+from epo_utils.api.documents import ExchangeDocument
 
 
 class EPOClient:
@@ -33,10 +33,8 @@ class EPOClient:
         )
 
     def get_publication(self, number, country_code=None,
-                        kind_code=None, date=None, **kwargs):
+                        kind_code=None, date=None, input_model=None, **kwargs):
         """ Retrieve publication and unfold response text into `dict`.
-
-        Returns contents inside top-level `"ops:world-patent-data"`-tag.
 
         Parameters
         ----------
@@ -48,6 +46,8 @@ class EPOClient:
             Pubication kind.
         date : str, optional
             YYYYMMDD-date.
+        input_model : type, optional
+            Subclass of :class:`epo_ops.models.BaseInput`
         **kwargs
             Keyword arguments passed to
             :meth:`epo_ops.RegisteredClient.published_data`.
@@ -58,8 +58,15 @@ class EPOClient:
         response : requests.Response
             Response-object.
         """
-        if not all([country_code, kind_code]):
+        if input_model is not None:
+            if not issubclass(input_model, models.BaseInput):
+                raise ValueError('input_model must inherit'
+                                 ' epo_ops.models.BaseInput')
+            model = input_model(str(number), country_code, kind_code, date)
+
+        elif not all([country_code, kind_code]):
             model = models.Original(str(number), country_code, kind_code, date)
+
         else:
             model = models.Docdb(str(number), country_code, kind_code, date)
 
@@ -70,6 +77,7 @@ class EPOClient:
         soup = BeautifulSoup(response.text, 'lxml')
         inner = soup.find('ops:world-patent-data')
 
+        # No documents were fetched.
         if inner is None:
             return None, response
 
@@ -79,6 +87,6 @@ class EPOClient:
         for doc in docs_xml:
             # '\nEP\n1000000\nA1\n20000517\n' => 'EP.1000000.A1.20000517'
             id_ = '.'.join(doc.find('document-id').text.strip().split())
-            documents[id_] = documents.ExchangeDocument(doc)
+            documents[id_] = ExchangeDocument(doc)
 
         return documents, response
