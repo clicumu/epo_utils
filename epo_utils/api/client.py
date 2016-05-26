@@ -2,8 +2,34 @@ import epo_ops
 from epo_ops import middlewares
 from epo_ops import models
 from bs4 import BeautifulSoup
+import enum
 
-from epo_utils.api.documents import ExchangeDocument
+from epo_utils.api.documents import ExchangeDocument, OPSPublicationReference
+
+
+class SearchFields(enum.Enum):
+    """
+    CQL search field identifiers accordint to:
+    https://worldwide.espacenet.com/help?locale=en_EP&method=handleHelpTopic&topic=fieldidentifier
+    """
+
+    Inventor = 'in'
+    Applicant = 'pa'
+    Title = 'ti'
+    Abstract = 'ab'
+    PriorityNumber = 'pr'
+    PublicationNumber = 'pn'
+    ApplicationNumber = 'ap'
+    PublicationDate = 'pd'
+    CitedDocument = 'ct'
+    CooperateivePatentClassification = 'cpc'
+    InventorAndApplicant = 'ia'
+    TitleAbstract = 'ta'
+    TitleAbstractInventorApplicant = 'txt'
+    ApplicationPublicationPriority = 'num'
+    IPC = 'ipc'
+    ICPCPC = 'cl'
+    CQL = 'cql'
 
 
 class EPOClient:
@@ -90,3 +116,43 @@ class EPOClient:
             documents[id_] = ExchangeDocument(doc)
 
         return documents, response
+
+    def search_published(self, field, query, range_begin=1, range_end=25):
+        """ Search EPO `field` after `query`.
+
+        If `field` is `SearchFields.CQL` `query` will be interpreted
+        as a free form search string and executed as is.
+
+        Parameters
+        ----------
+        field : SearchFields
+            EPO-OPS search field.
+        query : str
+            Query-parameter of full query if  `field` is `SearchFields.CQL`.
+        range_begin, range_end : int
+            Specification of number of search results to receive.
+            Results `range_begin` to `range_end` are retrieved.
+
+        Returns
+        -------
+        list[OPSPublicationReference]
+            Parsed references in search results.
+        requests.Response
+            Response object.
+        """
+        def search(query):
+            return self._client.published_data_search(query, range_begin, range_end)
+
+        # Perform search.
+        if field == SearchFields.CQL:
+            response = search(query)
+        else:
+            query_string = '{0}={1}'.format(field.value, query)
+            response = search(query_string)
+
+        # Parse results.
+        soup = BeautifulSoup(response.text, 'lxml')
+        results = [OPSPublicationReference(tag)
+                   for tag in soup.find_all('ops:publication-reference')]
+
+        return results, response
