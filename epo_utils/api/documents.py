@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from collections import namedtuple
 
 
@@ -11,6 +12,10 @@ class BaseEPOWrapper:
         Documents tag-entry.
     clean_tags : bool
         If True, text bodies are cleaned from <tag>:s.
+    normalize_unicode : bool
+        If True, text bodies will be unicode normalized according
+        to normal form KD. See:
+        https://docs.python.org/2/library/unicodedata.html#unicodedata.normalize
 
     Attributes
     ----------
@@ -18,9 +23,10 @@ class BaseEPOWrapper:
     """
     _id = None
 
-    def __init__(self, xml, clean_tags=True):
+    def __init__(self, xml, clean_tags=True, normalize_unicode=True):
         self.clean_tags = clean_tags
         self.xml = xml
+        self.normalize_unicode = normalize_unicode
 
     def clean_output(self, text):
         """ If `self.clean_tags` is True, remove markup tags
@@ -39,6 +45,12 @@ class BaseEPOWrapper:
             return re.sub(r'<.*>', '', text)
         else:
             return text
+
+    def __getattribute__(self, item):
+        value = super(BaseEPOWrapper, self).__getattribute__(item)
+        if isinstance(value, str) and self.normalize_unicode:
+            return unicodedata.normalize('NFKD', value)
+        return value
 
     def __str__(self):
         if self.__class__._id is None:
@@ -97,6 +109,10 @@ class ExchangeDocument(BaseEPOWrapper):
 
     @property
     def bibliographic_data(self):
+        """ dict: Bibliographic information.
+        `{"bibliographic-data": list[OPSPublicationReference]
+        "classification-ipcr": list[ClassificationIPCR]}`
+        """
         bib = self.xml.find('bibliographic-data')
         pub_refs = [OPSPublicationReference(tag)
                     for tag in bib.find_all('publication-reference')]
@@ -117,6 +133,16 @@ class ExchangeDocument(BaseEPOWrapper):
     def priority_claims(self):
         """ list[PriorityClaim]: Patent priority claims. """
         return [PriorityClaim(tag) for tag in self.xml.find_all('priority-claim')]
+
+    @property
+    def applicants(self):
+        """ list[Applicant]: Patent applicants."""
+        return [Applicant(tag) for tag in self.xml.find_all('applicant')]
+
+    @property
+    def inventors(self):
+        """ list[Inventor]: Patent inventors."""
+        return [Inventor(tag) for tag in self.xml.find_all('inventor')]
 
 
 class ClassificationIPCR(BaseEPOWrapper):
@@ -256,3 +282,31 @@ class PriorityClaim(BaseEPOWrapper):
     def document_ids(self):
         """ list[DocumentID] : Claim document-ids. """
         return [DocumentID(tag) for tag in self.xml.find_all('document-id')]
+
+
+class Applicant(BaseEPOWrapper):
+    """
+    Wrapper around `applicant`-tag.
+    """
+    _id = 'name'
+
+    @property
+    def name(self):
+        """ str: Applicant name. """
+        return self.xml.find_next('name').text.strip()
+
+    @property
+    def data_format(self):
+        """ str: `data-format`-attribute. """
+        return self.xml['data-format']
+
+    @property
+    def sequence(self):
+        """ str: `sequence`-attribute. """
+        return self.xml['sequence']
+
+
+class Inventor(Applicant):
+    """
+    Wrapper around `inventor`-tag.
+    """
