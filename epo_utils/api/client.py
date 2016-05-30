@@ -3,6 +3,7 @@ from epo_ops import middlewares
 from epo_ops import models
 from bs4 import BeautifulSoup
 import enum
+import requests_cache
 
 from epo_utils.api.documents import ExchangeDocument, OPSPublicationReference
 
@@ -45,11 +46,16 @@ class EPOClient:
         Client key.
     secret : str
         Client secret
+    cache : bool, optional
+        If True, cache API-calls using `requests-cache`. Default False.
+    cache_kwargs: dict, optional
+        If provided, keyword arguments will be passed to
+        `requests_cache.install_cache`
     **kwargs
         Keyword arguments passed to :class:`epo_ops.RegisteredClient`-
         constructor.
     """
-    def __init__(self, key, secret, **kwargs):
+    def __init__(self, key, secret, cache=False, cache_kwargs=None, **kwargs):
         middleware = kwargs.pop('middlewares', None) or [middlewares.Throttler()]
         self._client = epo_ops.RegisteredClient(
             key=key,
@@ -57,6 +63,8 @@ class EPOClient:
             middlewares=middleware,
             **kwargs
         )
+        if cache:
+            requests_cache.install_cache(**(cache_kwargs or dict()))
 
     def get_publication(self, number, country_code=None,
                         kind_code=None, date=None, input_model=None, **kwargs):
