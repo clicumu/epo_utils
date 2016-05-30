@@ -5,6 +5,8 @@ import unicodedata
 class BaseEPOWrapper:
     """ Base class for wrappers around EPO entries.
 
+    Caches all `property`-attributes automatically.
+
     Parameters
     ----------
     xml : bs4.element.Tag
@@ -25,6 +27,7 @@ class BaseEPOWrapper:
         chars = (chr(i) for i in range(0x110000))
         space_chars = (c for c in chars if unicodedata.category(c) == 'Zs')
         self.__space_re = re.compile(r'[%s]' % re.escape(''.join(space_chars)))
+        self.__cache = dict()
 
     def clean_output(self, text):
         """ If `self.clean_tags` is True, remove markup tags
@@ -45,9 +48,21 @@ class BaseEPOWrapper:
             return text
 
     def __getattribute__(self, item):
-        value = super(BaseEPOWrapper, self).__getattribute__(item)
-        if isinstance(value, str):
-            return re.sub(self.__space_re, ' ', value)
+        if isinstance(getattr(type(self), item, None), property):
+            cache_key = '_{}'.format(item)
+            try:
+                # Try to fetch from cache.
+                value = self.__cache[cache_key]
+            except KeyError:
+                # Else, parse results and substitute ugly unicode-spaces
+                # if value is a string.
+                value = super(BaseEPOWrapper, self).__getattribute__(item)
+                if isinstance(value, str):
+                    value = re.sub(self.__space_re, ' ', value)
+                self.__cache[cache_key] = value
+        else:
+            value = super(BaseEPOWrapper, self).__getattribute__(item)
+
         return value
 
     def __str__(self):
@@ -103,7 +118,10 @@ class ExchangeDocument(BaseEPOWrapper):
     @property
     def abstract(self):
         """ str: Document abstract."""
-        return self.clean_output(self.xml.find('abstract').text).strip()
+        try:
+            return self.clean_output(self.xml.find('abstract').text).strip()
+        except AttributeError:
+            return ''
 
     @property
     def bibliographic_data(self):
@@ -158,7 +176,10 @@ class ClassificationIPCR(BaseEPOWrapper):
     @property
     def text(self):
         """ str: IPCR text content. """
-        return self.xml.find_next('text').text
+        try:
+            return self.xml.find_next('text').text
+        except AttributeError:
+            return None
 
 
 class PatentClassification(BaseEPOWrapper):
@@ -181,27 +202,42 @@ class PatentClassification(BaseEPOWrapper):
     @property
     def klass(self):
         """ str: Class."""
-        return self.xml.find_next('class').text
+        try:
+            return self.xml.find_next('class').text
+        except AttributeError:
+            return None
 
     @property
     def main_group(self):
         """ str : Patent classification main-group. """
-        return self.xml.find_next('main-group').text
+        try:
+            return self.xml.find_next('main-group').text
+        except AttributeError:
+            return None
 
     @property
     def sub_group(self):
         """ str: Patent classification sub-group. """
-        return self.xml.find_next('sub-group').text
+        try:
+            return self.xml.find_next('sub-group').text
+        except AttributeError:
+            return None
 
     @property
     def classification_value(self):
         """ str: Value of classification. """
-        return self.xml.find_next('classification-value').text
+        try:
+            return self.xml.find_next('classification-value').text
+        except AttributeError:
+            return None
 
     @property
     def section(self):
         """ str: Patent classification section. """
-        return self.xml.find_next('section').text
+        try:
+            return self.xml.find_next('section').text
+        except AttributeError:
+            return None
 
 
 class DocumentID(BaseEPOWrapper):
@@ -218,17 +254,33 @@ class DocumentID(BaseEPOWrapper):
     @property
     def country(self):
         """ str: Country code. """
-        return self.xml.find_next('country').text
+        try:
+            return self.xml.find_next('country').text
+        except AttributeError:
+            return None
 
     @property
     def doc_number(self):
         """ str: Document code. """
-        return self.xml.find_next('doc-number').text
+        try:
+            return self.xml.find_next('doc-number').text
+        except AttributeError:
+            return None
 
     @property
     def kind(self):
         """ str: Kind code. """
-        return self.xml.find_next('kind').text
+        try:
+            return self.xml.find_next('kind').text
+        except AttributeError:
+            return None
+
+    @property
+    def date(self):
+        try:
+            return self.xml.find_next('date').text
+        except AttributeError:
+            return None
 
 
 class OPSPublicationReference(DocumentID):
@@ -291,7 +343,10 @@ class Applicant(BaseEPOWrapper):
     @property
     def name(self):
         """ str: Applicant name. """
-        return self.xml.find_next('name').text.strip()
+        try:
+            return self.xml.find_next('name').text.strip()
+        except AttributeError:
+            return ''
 
     @property
     def data_format(self):
