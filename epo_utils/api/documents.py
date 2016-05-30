@@ -1,6 +1,5 @@
 import re
 import unicodedata
-from collections import namedtuple
 
 
 class BaseEPOWrapper:
@@ -12,10 +11,6 @@ class BaseEPOWrapper:
         Documents tag-entry.
     clean_tags : bool
         If True, text bodies are cleaned from <tag>:s.
-    normalize_unicode : bool
-        If True, text bodies will be unicode normalized according
-        to normal form KD. See:
-        https://docs.python.org/2/library/unicodedata.html#unicodedata.normalize
 
     Attributes
     ----------
@@ -23,10 +18,13 @@ class BaseEPOWrapper:
     """
     _id = None
 
-    def __init__(self, xml, clean_tags=True, normalize_unicode=True):
+    def __init__(self, xml, clean_tags=True):
         self.clean_tags = clean_tags
         self.xml = xml
-        self.normalize_unicode = normalize_unicode
+
+        chars = (chr(i) for i in range(0x110000))
+        space_chars = (c for c in chars if unicodedata.category(c) == 'Zs')
+        self.__space_re = re.compile(r'[%s]' % re.escape(''.join(space_chars)))
 
     def clean_output(self, text):
         """ If `self.clean_tags` is True, remove markup tags
@@ -48,8 +46,8 @@ class BaseEPOWrapper:
 
     def __getattribute__(self, item):
         value = super(BaseEPOWrapper, self).__getattribute__(item)
-        if isinstance(value, str) and self.normalize_unicode:
-            return unicodedata.normalize('NFKD', value)
+        if isinstance(value, str):
+            return re.sub(self.__space_re, ' ', value)
         return value
 
     def __str__(self):
