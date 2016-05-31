@@ -1,3 +1,5 @@
-./idea
+idea/
+scripts/
 
 *.pyc
+*.sqlite

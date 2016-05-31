@@ -56,17 +56,17 @@ class EPOClient:
         constructor.
     """
     def __init__(self, key, secret, cache=False, cache_kwargs=None, **kwargs):
-        middleware = kwargs.pop('middlewares', None) or [middlewares.Throttler()]
+        if cache:
+            requests_cache.install_cache(**(cache_kwargs or dict()))
+        middleware = kwargs.pop('middlewares', [middlewares.Throttler()])
         self._client = epo_ops.RegisteredClient(
             key=key,
             secret=secret,
             middlewares=middleware,
             **kwargs
         )
-        if cache:
-            requests_cache.install_cache(**(cache_kwargs or dict()))
 
-    def get_publication(self, number, country_code=None,
+    def get_publication(self, number, country_code=None, id_type=None,
                         kind_code=None, date=None, input_model=None, **kwargs):
         """ Retrieve publication and unfold response text into `dict`.
 
@@ -98,9 +98,12 @@ class EPOClient:
                                  ' epo_ops.models.BaseInput')
             model = input_model(str(number), country_code, kind_code, date)
 
-        elif not all([country_code, kind_code]):
+        elif not all([id_type, country_code]) or id_type == 'original':
             model = models.Original(str(number), country_code, kind_code, date)
-
+        elif id_type == 'epodoc':
+            model = models.Epodoc(str(number), kind_code, date)
+        elif id_type == 'docdb':
+            model = models.Docdb(str(number), country_code, kind_code, date)
         else:
             model = models.Docdb(str(number), country_code, kind_code, date)
 
