@@ -23,6 +23,7 @@ class BaseEPOWrapper:
     def __init__(self, xml, clean_tags=True):
         self.clean_tags = clean_tags
         self.xml = xml
+        self.language_code = 'en'
 
         chars = (chr(i) for i in range(0x110000))
         space_chars = (c for c in chars if unicodedata.category(c) == 'Zs')
@@ -118,10 +119,23 @@ class ExchangeDocument(BaseEPOWrapper):
     @property
     def abstract(self):
         """ str: Document abstract."""
-        try:
-            return self.clean_output(self.xml.find('abstract').text).strip()
-        except AttributeError:
+        abstracts = self.xml.find_all('abstract')
+
+        if not abstracts:
             return ''
+
+        for abstract in abstracts:
+            try:
+                lang = abstract['lang']
+            except KeyError:
+                continue
+            else:
+                # Return if language is desired language.
+                if lang == self.language_code:
+                    return self.clean_output(abstract.text).strip()
+
+        # If no matching language was found, return first abstract found.
+        return self.clean_output(abstracts[0].text).strip()
 
     @property
     def bibliographic_data(self):
