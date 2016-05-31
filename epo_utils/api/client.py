@@ -3,9 +3,14 @@ from epo_ops import middlewares
 from epo_ops import models
 from bs4 import BeautifulSoup
 import enum
+import requests
 import requests_cache
 
 from epo_utils.api.documents import ExchangeDocument, OPSPublicationReference
+
+
+class ResourceNotFound(Exception):
+    pass
 
 
 class SearchFields(enum.Enum):
@@ -107,10 +112,18 @@ class EPOClient:
         else:
             model = models.Docdb(str(number), country_code, kind_code, date)
 
-        response = self._client.published_data(
-            reference_type='publication',
-            input=model, **kwargs
-        )
+        try:
+            response = self._client.published_data(
+                reference_type='publication',
+                input=model, **kwargs
+            )
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                # Raise separate error if nothing was found.
+                raise ResourceNotFound(str(e))
+            else:
+                raise
+
         soup = BeautifulSoup(response.text, 'lxml')
         inner = soup.find('ops:world-patent-data')
 
