@@ -25,6 +25,17 @@ AUTH_URL = 'https://ops.epo.org/3.1/auth/accesstoken'
 URL_PREFIX = 'https://ops.epo.org/3.1/rest-services'
 """ str: Base URL for all calls to API. """
 
+VALID_ENDPOINTS = [
+    'fulltext',
+    'claims',
+    'description',
+    'images',
+    'equivalents',
+    'biblio',
+    'abstract'
+]
+""" list[str] : EPO:s available API endpoints."""
+
 
 class Services(enum.Enum):
     """ EPO-OPS service - service url-infix mapping."""
@@ -41,6 +52,30 @@ class ReferenceType(enum.Enum):
     Publication = 'publication'
     Application = 'application'
     Priority = 'priority'
+
+
+class SearchFields(enum.Enum):
+    """
+    CQL search field identifiers according to:
+    https://worldwide.espacenet.com/help?locale=en_EP&method=handleHelpTopic&topic=fieldidentifier
+    """
+    Inventor = 'in'
+    Applicant = 'pa'
+    Title = 'ti'
+    Abstract = 'ab'
+    PriorityNumber = 'pr'
+    PublicationNumber = 'pn'
+    ApplicationNumber = 'ap'
+    PublicationDate = 'pd'
+    CitedDocument = 'ct'
+    CooperativePatentClassification = 'cpc'
+    InventorAndApplicant = 'ia'
+    TitleAbstract = 'ta'
+    TitleAbstractInventorApplicant = 'txt'
+    ApplicationPublicationPriority = 'num'
+    IPC = 'ipc'
+    ICPCPC = 'cl'
+    CQL = 'cql'
 
 
 class APIInput:
@@ -162,7 +197,9 @@ class EPOClient:
         requests.Response
         """
         if not isinstance(ref_type, ReferenceType):
-            raise ValueError('invalid service: {}'.format(ref_type))
+            raise ValueError('invalid ref_type: {}'.format(ref_type))
+        if endpoint not in VALID_ENDPOINTS:
+            raise ValueError('invalid endpoint: {}'.format(endpoint))
 
         options = options or list()
         url = build_ops_url(Services.Published, ref_type,
@@ -174,8 +211,45 @@ class EPOClient:
         response = requests.get(url, headers=headers)
         return response
 
-    def search(self, *args, **kwargs):
-        pass
+    def search(self, query, fetch_range,
+               service=Services.PublishedSearch, endpoint=''):
+        """ Post a search query.
+
+        Parameters
+        ----------
+        query : str
+            Query string.
+        fetch_range : tuple[int, int]
+            Get entries `fetch_range[0]` to `fetch_range[1]`.
+        service : Services
+            Which service to use for search.
+        endpoint : str, list[str]
+            Endpoint(s) to search.
+
+        Returns
+        -------
+        requests.Response
+        """
+        if not isinstance(service, Services):
+            raise ValueError('invalid service: {}'.format(service))
+        if not isinstance(endpoint, (list, tuple)):
+            endpoint = [endpoint]
+        if not all(e in VALID_ENDPOINTS for e in endpoint if e):
+            invalid = filter(lambda e: e in VALID_ENDPOINTS and not e, endpoint)
+            raise ValueError('invalid endpoint: {}'.format(next(invalid)))
+
+        headers = self._make_headers()
+        headers['Accept'] = 'application/exchange+xml'
+        headers['X-OPS-Range'] = '{}-{}'.format(*fetch_range)
+        url = build_ops_url(service, options=endpoint)
+
+        logging.info('Sends query: {}'.format(query))
+        response = requests.get(url, headers=headers,
+                                params={'q': query})
+        response.raise_for_status()
+        logging.info('Query successful.')
+
+        return response
 
     def authenticate(self):
         """ If EPO-OPS customer key and secret is available
@@ -226,8 +300,8 @@ class EPOClient:
         return headers
 
 
-def build_ops_url(service, reference_type, input,
-                  endpoint, options, only_input_format=False):
+def build_ops_url(service, reference_type=None, input=None,
+                  endpoint=None, options=None, only_input_format=False):
     """ Prepare an url for calling the OPS-API.
 
     If `only_input_format` is False the URL will be formatted as::
@@ -242,13 +316,13 @@ def build_ops_url(service, reference_type, input,
     ----------
     service : Services
         OPS-service.
-    reference_type : ReferenceType
+    reference_type : ReferenceType, optional
         Reference type to call.
-    input : APIInput or None
+    input : APIInput, optional
         Call input.
-    endpoint : str or None
+    endpoint : str, optional
         Optional endpoint.
-    options : list
+    options : list, optional
         Optional constituents.
 
     Returns
@@ -258,12 +332,12 @@ def build_ops_url(service, reference_type, input,
     """
     url_parts = [
         URL_PREFIX,
-        service.value,
-        reference_type.value,
-        input.id_type,
-        input.to_id() if not only_input_format else None,
+        service.value if service is not None else None,
+        reference_type.value if reference_type is not None else None,
+        input.id_type if input is not None else None,
+        input.to_id() if (input and not only_input_format) else None,
         endpoint,
-        ','.join(options)
+        ','.join(options) if options is not None else None
     ]
     present_parts = filter(None, url_parts)
     url = '/'.join(present_parts)

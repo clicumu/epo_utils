@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """ This module contains classes for high-level access to EPO-OPS. """
 from bs4 import BeautifulSoup
-import enum
 import requests
 import logging
 
@@ -11,31 +10,6 @@ from epo_utils.ops import api
 
 class ResourceNotFound(Exception):
     pass
-
-
-class SearchFields(enum.Enum):
-    """
-    CQL search field identifiers according to:
-    https://worldwide.espacenet.com/help?locale=en_EP&method=handleHelpTopic&topic=fieldidentifier
-    """
-
-    Inventor = 'in'
-    Applicant = 'pa'
-    Title = 'ti'
-    Abstract = 'ab'
-    PriorityNumber = 'pr'
-    PublicationNumber = 'pn'
-    ApplicationNumber = 'ap'
-    PublicationDate = 'pd'
-    CitedDocument = 'ct'
-    CooperateivePatentClassification = 'cpc'
-    InventorAndApplicant = 'ia'
-    TitleAbstract = 'ta'
-    TitleAbstractInventorApplicant = 'txt'
-    ApplicationPublicationPriority = 'num'
-    IPC = 'ipc'
-    ICPCPC = 'cl'
-    CQL = 'cql'
 
 
 class OPSConnection:
@@ -85,7 +59,7 @@ class OPSConnection:
         request_input = api.APIInput(
             id_type, number, kind_code, country_code, date
         )
-
+        logging.info('Attempts fetch for: {}'.format(request_input.to_id()))
         try:
             response = self.client.fetch_published_data(
                 api.ReferenceType.Publication, request_input
@@ -106,9 +80,10 @@ class OPSConnection:
             logging.info('xml lacked ops:world-patent-data tag.')
             return None, response
         elif inner.find_next('exchange-document').get('status') == 'not found':
-            logging.info('Exchange document. not found.')
+            logging.info('Exchange document not found.')
             raise ResourceNotFound(request_input.to_id())
 
+        logging.info('Fetch succeeded.')
         docs_xml = inner.find_all('exchange-document')
 
         documents = dict()
@@ -119,21 +94,24 @@ class OPSConnection:
 
         return documents, response
 
-    def search_published(self, field, query, range_begin=1, range_end=25):
+    def search_published(self, field, query, fetch_range=(1, 25), endpoint=''):
         """ Search EPO `field` after `query`.
 
         If `field` is `SearchFields.CQL` `query` will be interpreted
         as a free form search string and executed as is.
 
+        Endpoints supported by EPO: full-cycle, biblio, abstract
+
         Parameters
         ----------
-        field : SearchFields
+        field : epo_utils.ops.api.SearchFields
             EPO-OPS search field.
         query : str
             Query-parameter of full query if  `field` is `SearchFields.CQL`.
-        range_begin, range_end : int
-            Specification of number of search results to receive.
-            Results `range_begin` to `range_end` are retrieved.
+        fetch_range : tuple[int, int]
+            Get entries `fetch_range[0]` to `fetch_range[1]`.
+        endpoint : str
+            Published data endpoint.
 
         Returns
         -------
@@ -143,10 +121,10 @@ class OPSConnection:
             Response object.
         """
         def search(query):
-            return self.client.search(query, range_begin, range_end)
+            return self.client.search(query, fetch_range, endpoint=endpoint)
 
         # Perform search.
-        if field == SearchFields.CQL:
+        if field == api.SearchFields.CQL:
             response = search(query)
         else:
             query_string = '{0}={1}'.format(field.value, query)
@@ -154,7 +132,12 @@ class OPSConnection:
 
         # Parse results.
         soup = BeautifulSoup(response.text, 'lxml')
-        results = [OPSPublicationReference(tag)
-                   for tag in soup.find_all('ops:publication-reference')]
+
+        if not endpoint:
+            results = [OPSPublicationReference(tag)
+                       for tag in soup.find_all('ops:publication-reference')]
+        else:
+            results = [ExchangeDocument(tag)
+                       for tag in soup.find_all('exchange-document')]
 
         return results, response
