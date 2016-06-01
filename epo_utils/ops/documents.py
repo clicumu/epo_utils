@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+""" This module contain wrapper classes for EPO patent documents. """
 import re
 import unicodedata
 
@@ -5,7 +7,7 @@ import unicodedata
 class BaseEPOWrapper:
     """ Base class for wrappers around EPO entries.
 
-    Caches all `property`-attributes automatically.
+    Caches all `property`-attributes in memory automatically.
 
     Parameters
     ----------
@@ -19,6 +21,7 @@ class BaseEPOWrapper:
     clean_tags : bool
     """
     _id = None
+    """ str, optional : Name of ID-attribute """
 
     def __init__(self, xml, clean_tags=True):
         self.clean_tags = clean_tags
