@@ -5,7 +5,7 @@ This module contain classes and functions to get data from
 [EPO-OPS API](http://www.epo.org/searching-for-patents/technical/espacenet/ops.html)
 """
 import requests
-
+import enum
 try:
     import requests_cache
 except ImportError:
@@ -25,15 +25,22 @@ AUTH_URL = 'https://ops.epo.org/3.1/auth/accesstoken'
 URL_PREFIX = 'https://ops.epo.org/3.1/rest-services'
 """ str: Base URL for all calls to API. """
 
-SERVICE_NAMES = {
-    'family': 'family',
-    'numbers': 'number-service',
-    'published': 'published-data',
-    'published-search': 'published-data/search',
-    'register': 'register',
-    'register-search': 'register/search'
-}
-""" dict[str, str] : Service, service url-infix mapping. """
+
+class Services(enum.Enum):
+    """ EPO-OPS service - service url-infix mapping."""
+    Family = 'family'
+    Numbers = 'number-service'
+    Published = 'published-data'
+    PublishedSearch = 'published-data/search'
+    Register = 'register'
+    RegisterSearch = 'register/search'
+
+
+class ReferenceType(enum.Enum):
+    """ EPO-OPS API-call reference-types. """
+    Publication = 'publication'
+    Application = 'application'
+    Priority = 'priority'
 
 
 class APIInput:
@@ -43,19 +50,47 @@ class APIInput:
     def __init__(self, id_type, number, kind=None, country=None, date=None):
         if id_type not in ('epodoc', 'docdb', 'original'):
             raise ValueError('invalid id_type: {}'.format(id_type))
+        if date is not None:
+            date = str(date)
+            try:
+                datetime.strptime(date, '%Y%M%d')
+            except ValueError:
+                raise ValueError('date must be in YYYYMMDD-format')
+            else:
+                if len(date) != 8:
+                    raise ValueError('date must be in YYYYMMDD-format')
+
         self.id_type = id_type
-        self.number = number
+        self.number = str(number)
         self.kind = kind
         self.country = country
         self.date = date
 
     def to_id(self):
-        """
+        """ Format as valid API-input ID.
 
         Returns
         -------
         str
         """
+        if ',' in self.number or '.' in self.number or '/' in self.number:
+            number = '({})'.format(self.number)
+        else:
+            number = self.number
+
+        parts = filter(None, [self.country, number,
+                              self.kind, self.date])
+
+        if self.id_type == 'original':
+            id_ = '.'.join(parts).replace(' ', '%20')
+        elif self.id_type == 'docdb':
+            id_ = '.'.join(parts)
+        elif self.id_type == 'epodoc':
+            id_ = ''.join(parts)
+        else:
+            raise ValueError('invalid id_type: {}'.format(self.id_type))
+
+        return id_
 
 
 Token = namedtuple('Token', ['token', 'expires'])
@@ -93,6 +128,7 @@ class EPOClient:
             self.accept_type = 'application/{}'.format(accept_type)
 
         if cache and _HAS_CACHE:
+            logging.info('Installs cache.')
             requests_cache.install_cache(**(cache_kwargs or dict()))
         elif cache:
             raise ValueError('cache is set to True but requests_cache '
@@ -101,17 +137,19 @@ class EPOClient:
         self.secret = secret
         self.key = key
         if all([secret, key]):
+            logging.debug('Auth provided.')
             self.token = self.authenticate()
         else:
+            logging.debug('Auth not provided')
             self.token = None
 
-    def get_publication(self, service, input, endpoint='biblio', options=None):
+    def fetch_published_data(self, ref_type, input, endpoint='biblio', options=None):
         """
 
         Parameters
         ----------
-        service : str
-            OPS-service to call.
+        ref_type : ReferenceType
+            OPS-reference type of data to fetch.
         input : APIInput
             Input to API-call.
         endpoint : str
@@ -121,16 +159,23 @@ class EPOClient:
 
         Returns
         -------
-        requests.Request
+        requests.Response
         """
-        if not service in SERVICE_NAMES:
-            raise ValueError('invalid service: {}'.format(service))
+        if not isinstance(ref_type, ReferenceType):
+            raise ValueError('invalid service: {}'.format(ref_type))
 
         options = options or list()
-        url = build_ops_url('published', 'publication',
+        url = build_ops_url(Services.Published, ref_type,
                             input, endpoint, options)
-        response = requests.get(url, headers=self._make_headers())
+
+        headers = self._make_headers()
+
+        logging.debug('Makes request to: {}\nheaders: {}'.format(url, headers))
+        response = requests.get(url, headers=headers)
         return response
+
+    def search(self, *args, **kwargs):
+        pass
 
     def authenticate(self):
         """ If EPO-OPS customer key and secret is available
@@ -144,12 +189,16 @@ class EPOClient:
         if not all([self.secret, self.key]):
             return None
 
+        logging.info('Attempts to authenticate.')
+
         # Post base 64-encoded credentials to get access-token.
         credentials = '{0}:{1}'.format(self.key, self.secret)
         encoded_creds = b64encode(credentials.encode('ascii')).decode('ascii')
-        headers = {'Authorization': 'Bearer {}'.format(encoded_creds)}
+        headers = {'Authorization': 'Basic {}'.format(encoded_creds)}
         payload = {'grant_type': 'client_credentials'}
         response = requests.post(AUTH_URL, headers=headers, data=payload)
+        response.raise_for_status()
+        logging.info('Authentication succeeded.')
 
         # Parse response.
         content = response.json()
@@ -191,9 +240,9 @@ def build_ops_url(service, reference_type, input,
 
     Parameters
     ----------
-    service : str
-        OPS-service, see keys of :py:const:`SERVICE_NAMES`.
-    reference_type : {'publication', 'application', 'priority'}
+    service : Services
+        OPS-service.
+    reference_type : ReferenceType
         Reference type to call.
     input : APIInput or None
         Call input.
@@ -209,8 +258,8 @@ def build_ops_url(service, reference_type, input,
     """
     url_parts = [
         URL_PREFIX,
-        SERVICE_NAMES[service],
-        reference_type,
+        service.value,
+        reference_type.value,
         input.id_type,
         input.to_id() if not only_input_format else None,
         endpoint,
@@ -218,4 +267,5 @@ def build_ops_url(service, reference_type, input,
     ]
     present_parts = filter(None, url_parts)
     url = '/'.join(present_parts)
+    logging.debug('Built url: {}'.format(url))
     return url

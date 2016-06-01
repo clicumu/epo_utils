@@ -1,12 +1,12 @@
-import epo_ops
-from epo_ops import middlewares
-from epo_ops import models
+# -*- coding: utf-8 -*-
+""" This module contains classes for high-level access to EPO-OPS. """
 from bs4 import BeautifulSoup
 import enum
 import requests
-import requests_cache
+import logging
 
-from epo_utils.api.documents import ExchangeDocument, OPSPublicationReference
+from epo_utils.ops.documents import ExchangeDocument, OPSPublicationReference
+from epo_utils.ops import api
 
 
 class ResourceNotFound(Exception):
@@ -15,7 +15,7 @@ class ResourceNotFound(Exception):
 
 class SearchFields(enum.Enum):
     """
-    CQL search field identifiers accordint to:
+    CQL search field identifiers according to:
     https://worldwide.espacenet.com/help?locale=en_EP&method=handleHelpTopic&topic=fieldidentifier
     """
 
@@ -38,12 +38,8 @@ class SearchFields(enum.Enum):
     CQL = 'cql'
 
 
-class EPOClient:
-    """ A higher level wrapper of :class:`epo_ops.RegisteredClient`.
-
-    Default middlewares used:
-
-    * :class:`epo_ops.middlewares.Throttler`
+class OPSConnection:
+    """ A high-level user-facing wrapper for calling EPO-OPS API.
 
     Parameters
     ----------
@@ -51,28 +47,19 @@ class EPOClient:
         Client key.
     secret : str
         Client secret
-    cache : bool, optional
-        If True, cache API-calls using `requests-cache`. Default False.
-    cache_kwargs: dict, optional
-        If provided, keyword arguments will be passed to
-        `requests_cache.install_cache`
     **kwargs
-        Keyword arguments passed to :class:`epo_ops.RegisteredClient`-
+        Keyword arguments passed to :class:`epo_utils.ops.api.EPOClient`-
         constructor.
+
+    Attributes
+    ----------
+    client : epo_utils.ops.api.EPOClient
     """
-    def __init__(self, key, secret, cache=False, cache_kwargs=None, **kwargs):
-        if cache:
-            requests_cache.install_cache(**(cache_kwargs or dict()))
-        middleware = kwargs.pop('middlewares', [middlewares.Throttler()])
-        self._client = epo_ops.RegisteredClient(
-            key=key,
-            secret=secret,
-            middlewares=middleware,
-            **kwargs
-        )
+    def __init__(self, key, secret, **kwargs):
+        self.client = api.EPOClient(key=key, secret=secret, **kwargs)
 
     def get_publication(self, number, country_code=None, id_type=None,
-                        kind_code=None, date=None, input_model=None, **kwargs):
+                        kind_code=None, date=None, **kwargs):
         """ Retrieve publication and unfold response text into `dict`.
 
         Parameters
@@ -85,8 +72,6 @@ class EPOClient:
             Pubication kind.
         date : str, optional
             YYYYMMDD-date.
-        input_model : type, optional
-            Subclass of :class:`epo_ops.models.BaseInput`
         **kwargs
             Keyword arguments passed to
             :meth:`epo_ops.RegisteredClient.published_data`.
@@ -97,28 +82,17 @@ class EPOClient:
         response : requests.Response
             Response-object.
         """
-        if input_model is not None:
-            if not issubclass(input_model, models.BaseInput):
-                raise ValueError('input_model must inherit'
-                                 ' epo_ops.models.BaseInput')
-            model = input_model(str(number), country_code, kind_code, date)
-
-        elif not all([id_type, country_code]) or id_type == 'original':
-            model = models.Original(str(number), country_code, kind_code, date)
-        elif id_type == 'epodoc':
-            model = models.Epodoc(str(number), kind_code, date)
-        elif id_type == 'docdb':
-            model = models.Docdb(str(number), country_code, kind_code, date)
-        else:
-            model = models.Docdb(str(number), country_code, kind_code, date)
+        request_input = api.APIInput(
+            id_type, number, kind_code, country_code, date
+        )
 
         try:
-            response = self._client.published_data(
-                reference_type='publication',
-                input=model, **kwargs
+            response = self.client.fetch_published_data(
+                api.ReferenceType.Publication, request_input
             )
         except requests.HTTPError as e:
             if e.response.status_code == 404:
+                logging.info('Nothing for: {}'.format(request_input.to_id()))
                 # Raise separate error if nothing was found.
                 raise ResourceNotFound(str(e))
             else:
@@ -129,7 +103,11 @@ class EPOClient:
 
         # No documents were fetched.
         if inner is None:
+            logging.info('xml lacked ops:world-patent-data tag.')
             return None, response
+        elif inner.find_next('exchange-document').get('status') == 'not found':
+            logging.info('Exchange document. not found.')
+            raise ResourceNotFound(request_input.to_id())
 
         docs_xml = inner.find_all('exchange-document')
 
@@ -165,7 +143,7 @@ class EPOClient:
             Response object.
         """
         def search(query):
-            return self._client.published_data_search(query, range_begin, range_end)
+            return self.client.search(query, range_begin, range_end)
 
         # Perform search.
         if field == SearchFields.CQL:
