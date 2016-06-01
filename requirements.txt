@@ -1,3 +1,5 @@
-requests-cache
-bs4
-epo_ops
+beautifulsoup4==4.4.1
+bs4==0.0.1
+requests==2.10.0
+requests-cache==0.4.12
+wheel==0.24.0
