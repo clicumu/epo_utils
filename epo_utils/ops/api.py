@@ -182,7 +182,8 @@ class EPOClient:
             logging.debug('Auth not provided')
             self.token = None
 
-    def fetch(self, service, ref_type, input, endpoint='', options=None):
+    def fetch(self, service, ref_type, input, endpoint='',
+              options=None, extra_headers=None):
         """ Generic function to fetch data from the EPO-OPS API.
 
         Parameters
@@ -197,6 +198,10 @@ class EPOClient:
             API-endpoint to call.
         options : list, optional
             API-call constitents.
+        extra_headers : dict, optional
+            Additional or custom headers to be used.
+        use_post : bool
+            If True, POST will be used for request.
 
         Returns
         -------
@@ -213,14 +218,15 @@ class EPOClient:
         url = build_ops_url(service, ref_type,
                             input, endpoint, options)
 
-        headers = self._make_headers()
+        headers = self._make_headers(extra_headers)
 
         logging.debug('Makes request to: {}\nheaders: {}'.format(url, headers))
+
         response = requests.get(url, headers=headers)
         return response
 
-    def search(self, query, fetch_range,
-               service=Services.PublishedSearch, endpoint=''):
+    def search(self, query, fetch_range, service=Services.PublishedSearch,
+               endpoint='', extra_headers=None):
         """ Post a GET-search query.
 
         Parameters
@@ -233,6 +239,8 @@ class EPOClient:
             Which service to use for search.
         endpoint : str, list[str]
             Endpoint(s) to search.
+        extra_headers : dict, optional
+            Additional or custom headers to be used.
 
         Returns
         -------
@@ -246,14 +254,17 @@ class EPOClient:
             invalid = filter(lambda e: e in VALID_ENDPOINTS and not e, endpoint)
             raise ValueError('invalid endpoint: {}'.format(next(invalid)))
 
-        headers = self._make_headers()
-        headers['Accept'] = 'application/exchange+xml'
-        headers['X-OPS-Range'] = '{}-{}'.format(*fetch_range)
+        headers = self._make_headers(
+            {'Accept': 'application/exchange+xml',
+             'X-OPS-Range': '{}-{}'.format(*fetch_range)}
+        )
+        headers.update(extra_headers or dict())
+
         url = build_ops_url(service, options=endpoint)
 
         logging.info('Sends query: {}'.format(query))
-        response = requests.get(url, headers=headers,
-                                params={'q': query})
+        response = requests.post(url, headers=headers,
+                                 data={'q': query})
         response.raise_for_status()
         logging.info('Query successful.')
 
@@ -290,8 +301,13 @@ class EPOClient:
         token = Token(token, expires)
         return token
 
-    def _make_headers(self):
+    def _make_headers(self, extras=None):
         """ Prepare request headers.
+
+        Parameters
+        ----------
+        extras : dict, optional
+            Extra headers which should be used.
 
         Returns
         -------
@@ -304,6 +320,8 @@ class EPOClient:
                 self.authenticate()
 
             headers['Authorization'] = 'Bearer {}'.format(self.token.token)
+
+        headers.update(extras or dict())
 
         return headers
 
