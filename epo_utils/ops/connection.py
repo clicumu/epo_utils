@@ -48,7 +48,7 @@ class OPSConnection:
             YYYYMMDD-date.
         **kwargs
             Keyword arguments passed to
-            :meth:`epo_ops.RegisteredClient.published_data`.
+            :meth:`epo_utils.ops.api.EPOClient.fetch`.
         Returns
         -------
         documents : dict[str, ExchangeDocument]
@@ -59,10 +59,16 @@ class OPSConnection:
         request_input = api.APIInput(
             id_type, number, kind_code, country_code, date
         )
+        if 'endpoint' not in kwargs:
+            kwargs['endpoint'] = 'biblio'
+
         logging.info('Attempts fetch for: {}'.format(request_input.to_id()))
         try:
-            response = self.client.fetch_published_data(
-                api.ReferenceType.Publication, request_input
+            response = self.client.fetch(
+                api.Services.Published,
+                api.ReferenceType.Publication,
+                request_input,
+                **kwargs
             )
         except requests.HTTPError as e:
             if e.response.status_code == 404:

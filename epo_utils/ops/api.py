@@ -45,6 +45,7 @@ class Services(enum.Enum):
     PublishedSearch = 'published-data/search'
     Register = 'register'
     RegisterSearch = 'register/search'
+    Classification = 'classification/cpc'
 
 
 class ReferenceType(enum.Enum):
@@ -83,7 +84,7 @@ class APIInput:
     Simple wrapper around API-input.
     """
     def __init__(self, id_type, number, kind=None, country=None, date=None):
-        if id_type not in ('epodoc', 'docdb', 'original'):
+        if id_type not in ('epodoc', 'docdb', 'original', 'classification'):
             raise ValueError('invalid id_type: {}'.format(id_type))
         if date is not None:
             date = str(date)
@@ -108,7 +109,8 @@ class APIInput:
         -------
         str
         """
-        if ',' in self.number or '.' in self.number or '/' in self.number:
+        if ',' in self.number or '.' in self.number or '/' in self.number \
+                and self.id_type != 'classification':
             number = '({})'.format(self.number)
         else:
             number = self.number
@@ -122,6 +124,8 @@ class APIInput:
             id_ = '.'.join(parts)
         elif self.id_type == 'epodoc':
             id_ = ''.join(parts)
+        elif self.id_type == 'classification':
+            return number
         else:
             raise ValueError('invalid id_type: {}'.format(self.id_type))
 
@@ -178,11 +182,13 @@ class EPOClient:
             logging.debug('Auth not provided')
             self.token = None
 
-    def fetch_published_data(self, ref_type, input, endpoint='biblio', options=None):
-        """
+    def fetch(self, service, ref_type, input, endpoint='', options=None):
+        """ Generic function to fetch data from the EPO-OPS API.
 
         Parameters
         ----------
+        service : Services
+            OPS-service to fetch from.
         ref_type : ReferenceType
             OPS-reference type of data to fetch.
         input : APIInput
@@ -198,11 +204,13 @@ class EPOClient:
         """
         if not isinstance(ref_type, ReferenceType):
             raise ValueError('invalid ref_type: {}'.format(ref_type))
+        if not isinstance(service, Services):
+            raise ValueError('invalid service: {}'.format(service))
         if endpoint not in VALID_ENDPOINTS:
             raise ValueError('invalid endpoint: {}'.format(endpoint))
 
         options = options or list()
-        url = build_ops_url(Services.Published, ref_type,
+        url = build_ops_url(service, ref_type,
                             input, endpoint, options)
 
         headers = self._make_headers()
@@ -213,7 +221,7 @@ class EPOClient:
 
     def search(self, query, fetch_range,
                service=Services.PublishedSearch, endpoint=''):
-        """ Post a search query.
+        """ Post a GET-search query.
 
         Parameters
         ----------
