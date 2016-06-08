@@ -4,11 +4,16 @@ from bs4 import BeautifulSoup
 import requests
 import logging
 
-from epo_utils.ops.documents import ExchangeDocument, OPSPublicationReference
+from epo_utils.ops.documents import ExchangeDocument,\
+    OPSPublicationReference, FullTextDocument, FullTextInquiry
 from epo_utils.ops import api
 
 
 class ResourceNotFound(Exception):
+    pass
+
+
+class UnknownDocumentFormat(Exception):
     pass
 
 
@@ -85,18 +90,33 @@ class OPSConnection:
         if inner is None:
             logging.info('xml lacked ops:world-patent-data tag.')
             return None, response
-        elif inner.find_next('exchange-document').get('status') == 'not found':
-            logging.info('Exchange document not found.')
+
+        if inner.find('exchange-document') is not None:
+            tag_name = 'exchange-document'
+            doc_class = ExchangeDocument
+
+        elif inner.find('ftxt:fulltext-document') is not None:
+            tag_name = 'ftxt:fulltext-document'
+            doc_class = FullTextDocument
+
+        elif inner.find('ops:fulltext-inquiry') is not None:
+            tag_name = 'ops:fulltext-inquiry'
+            doc_class = FullTextInquiry
+
+        else:
+            raise UnknownDocumentFormat('no document with known format found.')
+
+        if inner.find_next(tag_name).get('status') == 'not found':
+            logging.info('Document not found.')
             raise ResourceNotFound(request_input.to_id())
 
         logging.info('Fetch succeeded.')
-        docs_xml = inner.find_all('exchange-document')
+        docs_xml = inner.find_all(tag_name)
 
         documents = dict()
         for doc in docs_xml:
-            # '\nEP\n1000000\nA1\n20000517\n' => 'EP.1000000.A1.20000517'
-            id_ = '.'.join(doc.find('document-id').text.strip().split())
-            documents[id_] = ExchangeDocument(doc)
+            doc_object = doc_class(doc)
+            documents[doc_object.id] = doc_object
 
         return documents, response
 

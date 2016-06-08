@@ -2,6 +2,7 @@
 """ This module contain wrapper classes for EPO patent documents. """
 import re
 import unicodedata
+from collections import namedtuple
 
 
 class BaseEPOWrapper:
@@ -50,6 +51,15 @@ class BaseEPOWrapper:
             return re.sub(r'<.*>', '', text)
         else:
             return text
+
+    @property
+    def id(self):
+        try:
+            id_ = getattr(self, self._id)
+        except TypeError:
+            id_ = None
+
+        return id_
 
     def __getattribute__(self, item):
         if isinstance(getattr(type(self), item, None), property):
@@ -176,6 +186,62 @@ class ExchangeDocument(BaseEPOWrapper):
     def inventors(self):
         """ list[Inventor]: Patent inventors."""
         return [Inventor(tag) for tag in self.xml.find_all('inventor')]
+    
+    
+class FullTextDocument(BaseEPOWrapper):
+
+    """ Wrapper around `ftxt:fulltext-document`-tag. """
+    _id = 'doc_number'
+
+    @property
+    def doc_number(self):
+        return self.publication_reference.doc_number
+
+    @property
+    def publication_reference(self):
+        """ PublicationReference: Patent reference."""
+        return PublicationReference(self.xml.find_next('publication-reference'))
+
+    @property
+    def claims(self):
+        """ list[str]: Patent claims. """
+        all_claims = self.xml.find_all('claims')
+        if not all_claims:
+            return None
+
+        right_language = (tag for tag in all_claims if
+                          tag['lang'].lower() == self.language_code)
+        claims = next(right_language, all_claims[0])
+        return [claim.text for claim in claims.find_all('claim-text')]
+
+
+class FullTextInquiry(BaseEPOWrapper):
+
+    _id = 'doc_number'
+
+    @property
+    def doc_number(self):
+        """ str: Publication document number. """
+        return self.publication_reference.doc_number
+
+    @property
+    def publication_reference(self):
+        """ OPSPublicationReference: `ops:publication-reference`-tag. """
+        tag = self.xml.find_next('ops:publication-reference')
+        return OPSPublicationReference(tag)
+
+    @property
+    def full_text_instances(self):
+        """ list[namedtuple]: `ops:fulltext-instance`-tags. """
+        instance_tags = self.xml.find_all('ops:fulltext-instance')
+        instance_tag = namedtuple('InstanceTag', ['desc', 'format'])
+        instances = list()
+        for tag in instance_tags:
+            instances.append(instance_tag(
+                tag['desc'],
+                tag.find_next('ops:fulltext-format').text
+            ))
+        return instances
 
 
 class ClassificationIPCR(BaseEPOWrapper):
@@ -298,6 +364,13 @@ class DocumentID(BaseEPOWrapper):
             return self.xml.find_next('date').text
         except AttributeError:
             return None
+
+
+class PublicationReference(DocumentID):
+
+    @property
+    def id_type(self):
+        return self.xml['data-format']
 
 
 class OPSPublicationReference(DocumentID):
