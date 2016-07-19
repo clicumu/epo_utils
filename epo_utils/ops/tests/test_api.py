@@ -1,9 +1,10 @@
 import unittest
 from unittest import mock
-import string
 import re
+import requests
 import requests_mock
 import hypothesis.strategies as st
+import string
 from hypothesis.extra import datetime as hyp_datetime
 from hypothesis import given, assume
 from epo_utils.ops import api
@@ -65,3 +66,88 @@ class APIInputTestCase(unittest.TestCase):
         assume(new_type not in api.VALID_IDTYPES)
         api_input.id_type = new_type
         self.assertRaises(ValueError, api_input.to_id)
+
+
+class EPOClientTestCase(unittest.TestCase):
+
+    def mock_auth(self, expires_in=10, succeed=True, token='token'):
+        _mock = requests_mock.mock()
+        _mock.post(api.AUTH_URL, status_code=200 if succeed else 401,
+                   json={'access_token': token, 'expires_in': expires_in})
+
+        return _mock
+
+
+class TestEPOClientCreation(EPOClientTestCase):
+
+    @given(utils.valid_epo_client_args(enable_cache=False))
+    def test_creation_doesnt_raise(self, args):
+        api.EPOClient.authenticate = mock.MagicMock()
+        client = api.EPOClient(*args)
+        self.assertIsInstance(client, api.EPOClient)
+
+    @given(utils.valid_epo_client_args())
+    def test_create_with_cache_calls_requests_cache(self, args):
+        api.EPOClient.authenticate = mock.MagicMock()
+        api.requests_cache.install_cache = mock.MagicMock()
+        accept_type, key, secret, _, cache_kwargs = args
+        cache = True
+
+        api.EPOClient(accept_type, key, secret, cache, cache_kwargs)
+        kwargs = cache_kwargs or dict()
+        self.assertTrue(api.requests_cache.install_cache.called_with(**kwargs))
+
+    @given(utils.valid_epo_client_args(enable_cache=False),
+           st.text(min_size=1, alphabet=string.ascii_letters),
+           st.text(min_size=1, alphabet=string.ascii_letters))
+    def test_client_auto_auths_with_key_and_secret(self, args, key, secret):
+        accept_type, _, _, cache, cache_kwargs = args
+        api.EPOClient.authenticate = mock.MagicMock()
+        client = api.EPOClient(accept_type, key, secret, cache, cache_kwargs)
+        self.assertTrue(api.EPOClient.authenticate.called)
+
+
+class TestEPOClientAuth(EPOClientTestCase):
+
+    def setUp(self):
+        self.__cache = api.requests_cache
+        api.requests_cache = mock.MagicMock()
+
+    def tearDown(self):
+        api.requests_cache = self.__cache
+
+    @given(args=utils.valid_epo_client_args(),
+           key=st.text(min_size=1, alphabet=string.ascii_letters),
+           secret=st.text(min_size=1, alphabet=string.ascii_letters))
+    def test_returns_token_on_success(self, args, key, secret):
+        accept_type, _, _, cache, cache_kwargs = args
+        token_content = 'success'
+        with self.mock_auth(succeed=True, token=token_content):
+            client = api.EPOClient(accept_type, key, secret,
+                                   cache, cache_kwargs)
+            token = client.authenticate()
+            self.assertIsInstance(token, api.Token)
+            self.assertEqual(token.token, token_content)
+
+    @given(args=utils.valid_epo_client_args())
+    def test_returns_none_on_missing_creds(self, args):
+        _, key, secret, _, _ = args
+        assume(key is None or secret is None)
+        with self.mock_auth(succeed=True):
+            client = api.EPOClient(*args)
+            token = client.authenticate()
+            self.assertIsNone(token)
+
+    @given(args=utils.valid_epo_client_args(),
+           key=st.text(min_size=1, alphabet=string.ascii_letters),
+           secret=st.text(min_size=1, alphabet=string.ascii_letters)
+           )
+    def test_raises_on_failed_auth(self, args, key, secret):
+        accept_type, _, _, cache, cache_kwargs = args
+        # Omit key and secret to prevent auto-auth.
+        client = api.EPOClient(accept_type, None, None, cache, cache_kwargs)
+
+        with self.mock_auth(succeed=False):
+            client.key = key
+            client.secret = secret
+            self.assertRaises(requests.HTTPError, client.authenticate)

@@ -38,14 +38,24 @@ def valid_api_input_args():
     return st.tuples(id_type, number, kind, country, date)
 
 
-def valid_epo_client_args():
+def valid_epo_client_args(enable_cache=True, must_have_auth=False):
     """ Args-tuple builder for `epo_utils.ops.api.EPOClient` """
-    accept_type = st.sampled_from(
+    data_type = st.sampled_from(
         ('xml', 'json', 'cpc+xml', 'fulltext+xml', 'exchange+xml',
          'ops+xml', 'cpc+xml', 'javascript'))
-    key = st.one_of(st.none(), st.text(alphabet=string.ascii_letters))
-    secret = st.one_of(st.none(), st.text(alphabet=string.ascii_letters))
-    cache = st.booleans()
+    stems = st.sampled_from(('application', ''))
+    accept_type = st.builds(lambda stem, d_type: '/'.join((stem, d_type)),
+                            stems, data_type)
+
+    if must_have_auth:
+        key = st.text(alphabet=string.ascii_letters, min_size=1)
+        secret = st.text(alphabet=string.ascii_letters, min_size=1)
+    else:
+        key = st.one_of(st.none(),
+                        st.text(alphabet=string.ascii_letters, min_size=1))
+        secret = st.one_of(st.none(),
+                           st.text(alphabet=string.ascii_letters, min_size=1))
+    cache = st.booleans() if enable_cache else st.just(False)
     cache_kwargs = st.one_of(st.none(), st.dictionaries(st.text(), st.text()))
     return st.tuples(accept_type, key, secret, cache, cache_kwargs)
 
