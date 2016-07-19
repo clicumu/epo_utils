@@ -36,6 +36,9 @@ VALID_ENDPOINTS = [
 ]
 """ list[str] : EPO:s available API endpoints."""
 
+VALID_IDTYPES = ('epodoc', 'docdb', 'original', 'classification')
+""" list[str] : Valid API-input formats. """
+
 
 class Services(enum.Enum):
     """ EPO-OPS service - service url-infix mapping."""
@@ -84,17 +87,21 @@ class APIInput:
     Simple wrapper around API-input.
     """
     def __init__(self, id_type, number, kind=None, country=None, date=None):
-        if id_type not in ('epodoc', 'docdb', 'original', 'classification'):
+        if id_type not in VALID_IDTYPES:
             raise ValueError('invalid id_type: {}'.format(id_type))
         if date is not None:
             date = str(date)
             try:
-                datetime.strptime(date, '%Y%M%d')
+                datetime.strptime(date, '%Y%m%d')
             except ValueError:
                 raise ValueError('date must be in YYYYMMDD-format')
             else:
                 if len(date) != 8:
                     raise ValueError('date must be in YYYYMMDD-format')
+        if country is not None and not country.strip():
+            raise ValueError('country cant be empty if provided')
+        if kind is not None and not kind.strip():
+            raise ValueError('kind cant be empty if provided')
 
         self.id_type = id_type
         self.number = str(number)
@@ -109,14 +116,14 @@ class APIInput:
         -------
         str
         """
-        if ',' in self.number or '.' in self.number or '/' in self.number \
+        if (',' in self.number or '.' in self.number or '/' in self.number) \
                 and self.id_type != 'classification':
             number = '({})'.format(self.number)
         else:
             number = self.number
 
-        parts = filter(None, [self.country, number,
-                              self.kind, self.date])
+        parts = (part for part in [self.country, number, self.kind, self.date]
+                 if part is not None)
 
         if self.id_type == 'original':
             id_ = '.'.join(parts).replace(' ', '%20')
@@ -369,3 +376,16 @@ def build_ops_url(service, reference_type=None, input=None,
     url = '/'.join(present_parts)
     logging.debug('Built url: {}'.format(url))
     return url
+
+
+__all__ = [
+    AUTH_URL,
+    URL_PREFIX,
+    VALID_ENDPOINTS,
+    Services,
+    ReferenceType,
+    SearchFields,
+    EPOClient,
+    Token,
+    APIInput
+]
