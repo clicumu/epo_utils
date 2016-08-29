@@ -170,7 +170,7 @@ class ExchangeDocument(BaseEPOWrapper):
     @property
     def application_reference(self):
         """ ApplicationReference: Documents `application-reference`"""
-        return ApplicationReference(self.xml.find_next('application-reference'))
+        return ApplicationReference(self.xml.findChild('application-reference'))
 
     @property
     def priority_claims(self):
@@ -200,7 +200,18 @@ class FullTextDocument(BaseEPOWrapper):
     @property
     def publication_reference(self):
         """ PublicationReference: Patent reference."""
-        return PublicationReference(self.xml.find_next('publication-reference'))
+        return PublicationReference(self.xml.findChild('publication-reference'))
+
+    @property
+    def description(self):
+        """ str: `description-tag`"""
+        all_descriptions = self.xml.find_all('description')
+        description = next(
+            (desc for desc in all_descriptions
+             if desc.get('lang', '').lower() == self.language_code),
+            all_descriptions[0]
+        )
+        return self.clean_output(description.text)
 
     @property
     def claims(self):
@@ -217,18 +228,26 @@ class FullTextDocument(BaseEPOWrapper):
 
 class FullTextInquiry(BaseEPOWrapper):
 
+    """ Wraps `ops:fulltext-inquiry`-tags. """
+
     _id = 'doc_number'
 
     @property
     def doc_number(self):
         """ str: Publication document number. """
-        return self.publication_reference.doc_number
+        return self.ops_publication_reference.doc_number
 
     @property
-    def publication_reference(self):
+    def ops_publication_reference(self):
         """ OPSPublicationReference: `ops:publication-reference`-tag. """
-        tag = self.xml.find_next('ops:publication-reference')
+        tag = self.xml.findChild('ops:publication-reference')
         return OPSPublicationReference(tag)
+
+    @property
+    def document_id(self):
+        """ OPSPublicationReference: `ops:publication-reference`-tag. """
+        tag = self.xml.findChild('document-id')
+        return DocumentID(tag)
 
     @property
     def full_text_instances(self):
@@ -239,7 +258,7 @@ class FullTextInquiry(BaseEPOWrapper):
         for tag in instance_tags:
             instances.append(instance_tag(
                 tag['desc'],
-                tag.find_next('ops:fulltext-format').text
+                tag.findChild('ops:fulltext-format').text
             ))
         return instances
 
@@ -260,7 +279,7 @@ class ClassificationIPCR(BaseEPOWrapper):
     def text(self):
         """ str: IPCR text content. """
         try:
-            return self.xml.find_next('text').text
+            return self.xml.findChild('text').text
         except AttributeError:
             return None
 
@@ -286,7 +305,7 @@ class PatentClassification(BaseEPOWrapper):
     def klass(self):
         """ str: Class."""
         try:
-            return self.xml.find_next('class').text
+            return self.xml.findChild('class').text
         except AttributeError:
             return None
 
@@ -294,7 +313,7 @@ class PatentClassification(BaseEPOWrapper):
     def main_group(self):
         """ str : Patent classification main-group. """
         try:
-            return self.xml.find_next('main-group').text
+            return self.xml.findChild('main-group').text
         except AttributeError:
             return None
 
@@ -302,7 +321,7 @@ class PatentClassification(BaseEPOWrapper):
     def sub_group(self):
         """ str: Patent classification sub-group. """
         try:
-            return self.xml.find_next('sub-group').text
+            return self.xml.findChild('sub-group').text
         except AttributeError:
             return None
 
@@ -310,7 +329,7 @@ class PatentClassification(BaseEPOWrapper):
     def classification_value(self):
         """ str: Value of classification. """
         try:
-            return self.xml.find_next('classification-value').text
+            return self.xml.findChild('classification-value').text
         except AttributeError:
             return None
 
@@ -318,7 +337,7 @@ class PatentClassification(BaseEPOWrapper):
     def section(self):
         """ str: Patent classification section. """
         try:
-            return self.xml.find_next('section').text
+            return self.xml.findChild('section').text
         except AttributeError:
             return None
 
@@ -338,7 +357,7 @@ class DocumentID(BaseEPOWrapper):
     def country(self):
         """ str: Country code. """
         try:
-            return self.xml.find_next('country').text
+            return self.xml.findChild('country').text.strip()
         except AttributeError:
             return None
 
@@ -346,7 +365,7 @@ class DocumentID(BaseEPOWrapper):
     def doc_number(self):
         """ str: Document code. """
         try:
-            return self.xml.find_next('doc-number').text
+            return self.xml.findChild('doc-number').text.strip()
         except AttributeError:
             return None
 
@@ -354,14 +373,14 @@ class DocumentID(BaseEPOWrapper):
     def kind(self):
         """ str: Kind code. """
         try:
-            return self.xml.find_next('kind').text
+            return self.xml.findChild('kind').text.strip()
         except AttributeError:
             return None
 
     @property
     def date(self):
         try:
-            return self.xml.find_next('date').text
+            return self.xml.findChild('date').text.strip()
         except AttributeError:
             return None
 
@@ -383,7 +402,7 @@ class OPSPublicationReference(DocumentID):
     @property
     def id_type(self):
         """ str: `document-id-type`-attribute. """
-        return self.xml.find_next('document-id')['document-id-type']
+        return self.xml.findChild('document-id')['document-id-type']
 
 
 class ApplicationReference(BaseEPOWrapper):
@@ -434,7 +453,7 @@ class Applicant(BaseEPOWrapper):
     def name(self):
         """ str: Applicant name. """
         try:
-            return self.xml.find_next('name').text.strip()
+            return self.xml.findChild('name').text.strip()
         except AttributeError:
             return ''
 
