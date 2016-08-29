@@ -32,7 +32,8 @@ VALID_ENDPOINTS = [
     'images',
     'equivalents',
     'biblio',
-    'abstract'
+    'abstract',
+    '',
 ]
 """ list[str] : EPO:s available API endpoints."""
 
@@ -257,9 +258,13 @@ class EPOClient:
             raise ValueError('invalid service: {}'.format(service))
         if not isinstance(endpoint, (list, tuple)):
             endpoint = [endpoint]
-        if not all(e in VALID_ENDPOINTS for e in endpoint if e):
-            invalid = filter(lambda e: e in VALID_ENDPOINTS and not e, endpoint)
+        if not all(e in VALID_ENDPOINTS for e in endpoint):
+            invalid = filter(lambda e: e not in VALID_ENDPOINTS,
+                             endpoint)
             raise ValueError('invalid endpoint: {}'.format(next(invalid)))
+        if not len(fetch_range) == 2 \
+                and all(isinstance(i, int) for i in fetch_range):
+            raise ValueError('invalid fetch_range: {}'.format(fetch_range))
 
         headers = self._make_headers(
             {'Accept': 'application/exchange+xml',
@@ -324,7 +329,7 @@ class EPOClient:
         if self.token is not None:
             if self.token is None or datetime.now() > self.token.expires:
                 # Refresh token if is expired or missing.
-                self.authenticate()
+                self.token = self.authenticate()
 
             headers['Authorization'] = 'Bearer {}'.format(self.token.token)
 
