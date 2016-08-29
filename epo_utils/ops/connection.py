@@ -120,7 +120,8 @@ class OPSConnection:
 
         return documents, response
 
-    def search_published(self, field, query, fetch_range=(1, 25), endpoint=''):
+    def search_published(self, field, query, fetch_range=(1, 25),
+                         num_publications=None, endpoint=''):
         """ Search EPO `field` after `query`.
 
         If `field` is `SearchFields.CQL` `query` will be interpreted
@@ -135,7 +136,10 @@ class OPSConnection:
         query : str
             Query-parameter of full query if  `field` is `SearchFields.CQL`.
         fetch_range : tuple[int, int]
-            Get entries `fetch_range[0]` to `fetch_range[1]`.
+            Get entries `fetch_range[0]` to `fetch_range[1]` inclusive.
+        num_publications : int, optional
+            If provided, overrides `fetch_range`. Fetches `num_publications`
+            latest publications.
         endpoint : str
             Published data endpoint.
 
@@ -146,24 +150,42 @@ class OPSConnection:
         requests.Response
             Response object.
         """
-        def search(query):
-            return self.client.search(query, fetch_range, endpoint=endpoint)
-
-        # Perform search.
-        if field == api.SearchFields.CQL:
-            response = search(query)
+        end_results = list()
+        if num_publications is not None:
+            fetch_range = [1, num_publications]
         else:
-            query_string = '{0}={1}'.format(field.value, query)
-            response = search(query_string)
+            num_publications = fetch_range[1] - fetch_range[0] + 1
+        logging.debug(
+            'Preparing to fetch {} publications'.format(num_publications))
 
-        # Parse results.
-        soup = BeautifulSoup(response.text, 'lxml')
+        while len(end_results) < num_publications:
+            start = fetch_range[0] + (0 if not end_results else len(end_results))
+            end = min(start + 99, fetch_range[1])
+            logging.debug('Fetching start: {}, end: {}'.format(start, end))
 
-        if not endpoint:
-            results = [OPSPublicationReference(tag)
-                       for tag in soup.find_all('ops:publication-reference')]
-        else:
-            results = [ExchangeDocument(tag)
-                       for tag in soup.find_all('exchange-document')]
+            # Perform search.
+            if field == api.SearchFields.CQL:
+                response = self.client.search(query, (start, end),
+                                              endpoint=endpoint)
+            else:
+                query_string = '{0}={1}'.format(field.value, query)
+                response = self.client.search(query_string, (start, end),
+                                              endpoint=endpoint)
 
-        return results, response
+            # Parse results.
+            soup = BeautifulSoup(response.text, 'lxml')
+
+            if not endpoint:
+                results = [OPSPublicationReference(tag)
+                           for tag in soup.find_all('ops:publication-reference')]
+            else:
+                results = [ExchangeDocument(tag)
+                           for tag in soup.find_all('exchange-document')]
+
+            logging.debug('{} parsed publications.'.format(len(results)))
+            end_results.extend(results)
+
+            if not results or len(results) < (end - start + 1):
+                break
+
+        return end_results, response
