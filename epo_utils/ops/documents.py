@@ -29,9 +29,6 @@ class BaseEPOWrapper:
         self.xml = xml
         self.language_code = 'en'
 
-        chars = (chr(i) for i in range(0x110000))
-        space_chars = (c for c in chars if unicodedata.category(c) == 'Zs')
-        self.__space_re = re.compile(r'[%s]' % re.escape(''.join(space_chars)))
         self.__cache = dict()
 
     def clean_output(self, text):
@@ -72,7 +69,7 @@ class BaseEPOWrapper:
                 # if value is a string.
                 value = super(BaseEPOWrapper, self).__getattribute__(item)
                 if isinstance(value, str):
-                    value = re.sub(self.__space_re, ' ', value)
+                    value = re.sub(r'\s+', ' ', value)
                 self.__cache[cache_key] = value
         else:
             value = super(BaseEPOWrapper, self).__getattribute__(item)
@@ -98,96 +95,151 @@ class BaseEPOWrapper:
 
 
 class ExchangeDocument(BaseEPOWrapper):
-    """
-    Wrapper class around a EPO-OPS exchange document.
-    """
 
-    _id = 'doc_number'
+    _id = 'full_id'
 
     @property
-    def doc_number(self):
-        """ str: Document number. """
-        return self.xml['doc-number']
-
-    @property
-    def family_id(self):
-        """ str: `family-id` attribute. """
-        return self.xml.get('family-id', None)
+    def full_id(self):
+        """ str : Rendered ID. """
+        return self.country + self.doc_number + self.kind
 
     @property
     def system(self):
-        """ str: `system`-attribute. """
-        return self.xml.get('system', None)
+        """ str : Document system. """
+        return self.xml['system']
+
+    @property
+    def family_id(self):
+        """ str : Patent family. """
+        return self.xml['family-id']
 
     @property
     def country(self):
-        """ str: Country code. """
-        return self.xml.get('country', None)
+        """ str : Country code. """
+        return self.xml['country']
+
+    @property
+    def doc_number(self):
+        """ str : Doc-number string. """
+        return self.xml['doc-number']
 
     @property
     def kind(self):
-        """ str: Document kind. """
+        """ str : Patent kind code. """
         return self.xml['kind']
 
     @property
-    def abstract(self):
-        """ str: Document abstract."""
-        abstracts = self.xml.find_all('abstract')
-
-        if not abstracts:
-            return ''
-
-        for abstract in abstracts:
-            try:
-                lang = abstract['lang']
-            except KeyError:
-                continue
-            else:
-                # Return if language is desired language.
-                if lang == self.language_code:
-                    return self.clean_output(abstract.text).strip()
-
-        # If no matching language was found, return first abstract found.
-        return self.clean_output(abstracts[0].text).strip()
+    def publication_reference(self):
+        """ list[DocumentID] : Patent publication reference in
+        different formats.
+        """
+        pub_ref = self.xml.findChild('publication-reference')
+        return [DocumentID(tag) for tag in pub_ref.find_all('document-id')]
 
     @property
-    def bibliographic_data(self):
-        """ dict: Bibliographic information.
-        `{"bibliographic-data": list[OPSPublicationReference]
-        "classification-ipcr": list[ClassificationIPCR]}`
+    def classifications(self):
+        """ dict[str, list[str]] : Classification system as keys and list
+        of classification codes as values.
         """
-        bib = self.xml.find('bibliographic-data')
-        pub_refs = [OPSPublicationReference(tag)
-                    for tag in bib.find_all('publication-reference')]
-        ipcr = [ClassificationIPCR(tag)
-                for tag in bib.find_all('classification-ipcr')]
+        classifications = dict()
+        ipc = self.xml.findChild('classification-ipc')
+        if ipc is not None:
+            classifications['IPC'] = [tag.text for tag in ipc.find_all('text')]
 
-        return {
-            'publication-reference': pub_refs,
-            'classification-ipcr': ipcr
-        }
+        ipcr = self.xml.findChild('classifications-ipcr')
+        if ipcr is not None:
+            classifications['IPCR'] = [' '.join(tag.text.split())
+                                       for tag in ipcr.find_all('text')]
+
+        others = self.xml.findChild(
+            'patent-classifications'
+        ).find_all('patent-classification')
+        if others is not None:
+            cpc_classes = list()
+            for other in others:
+                cpc_class = '{}{}{}{}{}/{} {}'.format(
+                    *[c.text for c in other.children if hasattr(c, 'text')])
+                cpc_classes.append(cpc_class)
+
+            classifications['CPC'] = cpc_classes
+
+        return classifications
 
     @property
     def application_reference(self):
-        """ ApplicationReference: Documents `application-reference`"""
-        return ApplicationReference(self.xml.findChild('application-reference'))
+        """ ApplicationReference : Patent application reference. """
+        app_ref = self.xml.findChild('application-reference')
+        return ApplicationReference(app_ref) if app_ref is not None else None
 
     @property
     def priority_claims(self):
-        """ list[PriorityClaim]: Patent priority claims. """
+        """ list[PriorityClaim] : Patent priority claims."""
         return [PriorityClaim(tag) for tag in self.xml.find_all('priority-claim')]
 
     @property
     def applicants(self):
-        """ list[Applicant]: Patent applicants."""
-        return [Applicant(tag) for tag in self.xml.find_all('applicant')]
+        """ list[Party] : Applicants ordered according to patent sequence. """
+        return self._find_parties('applicants', 'applicant')
 
     @property
     def inventors(self):
-        """ list[Inventor]: Patent inventors."""
-        return [Inventor(tag) for tag in self.xml.find_all('inventor')]
-    
-    
+        """ list[Party] : Inventors ordered according to patent sequence """
+        return self._find_parties('inventors', 'inventor')
+
+    @property
+    def title(self):
+        """ dict[str, str] : Language code - title."""
+        return {tag['lang']: re.sub(r'\s', ' ', tag.text.strip())
+                for tag in self.xml.find_all('invention-title')}
+
+    @property
+    def citations(self):
+        """ list[Citation] : Citations ordered according to patent sequence. """
+        citation_tags = self.xml.findChild(
+            'references-cited').find_all('citation')
+        citations = list()
+
+        for tag in citation_tags:
+            if tag.findChild('patcit') is not None:
+                citation = PatentCitation(tag)
+            else:
+                citation = NonPatentCitation(tag)
+            citations.append(citation)
+
+        return citations
+
+    @property
+    def abstract(self):
+        """ dict[str, str] : Language code, abstract pairs."""
+        return {tag['lang']: self.clean_output(tag.text.strip())
+                for tag in self.xml.find_all('abstract')}
+
+    def _find_parties(self, root, sub):
+        """ Parse exchange-documents parties-tags.
+
+        Parameters
+        ----------
+        root : str
+            Base-tag.
+        sub : str
+            Sub element-tag.
+
+        Returns
+        -------
+        list[Party]
+        """
+        names = dict()
+        epodocs = dict()
+        for tag in self.xml.find(root).find_all(sub):
+            name = re.sub(r'\s', ' ', tag.findChild('name').text).strip()
+            seq = tag['sequence']
+            if tag['data-format'] == 'original':
+                names[seq] = name
+            else:
+                epodocs[seq] = name
+        return [Party(names[key], epodocs[key]) for key in sorted(names.keys())]
+
+
 class FullTextDocument(BaseEPOWrapper):
 
     """ Wrapper around `ftxt:fulltext-document`-tag. """
@@ -263,85 +315,6 @@ class FullTextInquiry(BaseEPOWrapper):
         return instances
 
 
-class ClassificationIPCR(BaseEPOWrapper):
-
-    """
-    Wrapper around `classification-ipcr`-tag.
-    """
-    _id = 'sequence'
-
-    @property
-    def sequence(self):
-        """ str: Sequence. """
-        return self.xml['sequence']
-
-    @property
-    def text(self):
-        """ str: IPCR text content. """
-        try:
-            return self.xml.findChild('text').text
-        except AttributeError:
-            return None
-
-
-class PatentClassification(BaseEPOWrapper):
-    """
-    Wrapper around `patent-classfication`.
-    """
-    _id = 'sequence'
-
-    @property
-    def sequence(self):
-        return self.xml['sequence']
-
-    @property
-    def classification_scheme(self):
-        """ list[dict] : Schemes with office and scheme-id of classification."""
-        schemes = self.xml.find_all('classification-scheme')
-        return [{'office': scheme['office'], 'scheme': scheme['scheme']}
-                for scheme in schemes]
-
-    @property
-    def klass(self):
-        """ str: Class."""
-        try:
-            return self.xml.findChild('class').text
-        except AttributeError:
-            return None
-
-    @property
-    def main_group(self):
-        """ str : Patent classification main-group. """
-        try:
-            return self.xml.findChild('main-group').text
-        except AttributeError:
-            return None
-
-    @property
-    def sub_group(self):
-        """ str: Patent classification sub-group. """
-        try:
-            return self.xml.findChild('sub-group').text
-        except AttributeError:
-            return None
-
-    @property
-    def classification_value(self):
-        """ str: Value of classification. """
-        try:
-            return self.xml.findChild('classification-value').text
-        except AttributeError:
-            return None
-
-    @property
-    def section(self):
-        """ str: Patent classification section. """
-        try:
-            return self.xml.findChild('section').text
-        except AttributeError:
-            return None
-
-
 class DocumentID(BaseEPOWrapper):
     """
     Wrapper around `document-id`-tag.
@@ -385,11 +358,11 @@ class DocumentID(BaseEPOWrapper):
             return None
 
 
-class PublicationReference(DocumentID):
+class InquiryResult(DocumentID):
 
-    @property
-    def id_type(self):
-        return self.xml['data-format']
+    def __init__(self, xml, **kwargs):
+        super(InquiryResult, self).__init__(xml.findChild('document-id'),
+                                            **kwargs)
 
 
 class OPSPublicationReference(DocumentID):
@@ -413,11 +386,12 @@ class ApplicationReference(BaseEPOWrapper):
 
     @property
     def doc_id(self):
-        """ str: `doc-id`-attribute. """
+        """ str : Patent RID. """
         return self.xml['doc-id']
 
+    @property
     def document_ids(self):
-        """ list[DocumentID] : Application-reference's `document-id`-tags. """
+        """ list[DocumentID] : Document ID:s in different formats. """
         return [DocumentID(tag) for tag in self.xml.find_all('document-id')]
 
 
@@ -443,32 +417,88 @@ class PriorityClaim(BaseEPOWrapper):
         return [DocumentID(tag) for tag in self.xml.find_all('document-id')]
 
 
-class Applicant(BaseEPOWrapper):
+class Citation(BaseEPOWrapper):
     """
-    Wrapper around `applicant`-tag.
+    Wraps `citation`-tag.
     """
-    _id = 'name'
+    @property
+    def cited_phase(self):
+        """ str : Citation phase. """
+        return self.xml['cited-phase']
 
     @property
-    def name(self):
-        """ str: Applicant name. """
+    def cited_by(self):
+        """ str : Who cited the document during the citation phase. """
+        return self.xml['cited-by']
+
+    @property
+    def category(self):
+        """ str : Citation category-code."""
+        return self.xml.findChild('category').text
+    
+    @property
+    def office(self):
+        """ str, None : citation office."""
         try:
-            return self.xml.findChild('name').text.strip()
-        except AttributeError:
-            return ''
+            office = self.xml['office']
+        except KeyError:
+            office = None
+        return office
+
+
+class PatentCitation(Citation):
+    """
+    Wraps a `citation` with `patcit`-child.
+    """
+    _id = 'num'
 
     @property
-    def data_format(self):
-        """ str: `data-format`-attribute. """
-        return self.xml['data-format']
+    def num_type(self):
+        """ str : """
+        return self.xml.findChild('patcit')['dnum-type']
 
     @property
-    def sequence(self):
-        """ str: `sequence`-attribute. """
-        return self.xml['sequence']
+    def num(self):
+        """ int : `patcit`:s `num`-attribute. """
+        return int(self.xml.findChild('patcit')['num'])
+
+    @property
+    def document_ids(self):
+        """ list[DocumentID] : ID:s ordered according to patent order. """
+        return [DocumentID(tag) for tag in self.xml.find_all('document-id')]
 
 
-class Inventor(Applicant):
+class NonPatentCitation(Citation):
     """
-    Wrapper around `inventor`-tag.
+    Wraps a `citation` with `nlpcit`-child.
     """
+    _id = 'num'
+
+    @property
+    def num(self):
+        """ int : `patcit`:s `num`-attribute. """
+        return int(self.xml.findChild('nplcit')['num'])
+
+    @property
+    def text(self):
+        return self.xml.findChild('text').text
+
+
+class Party:
+    """
+    Applicant or inventor.
+
+    Parameters
+    ----------
+    name : str
+        Name in `original`-format.
+    epodic : str
+        Name in `epodoc`-format.
+    """
+    def __init__(self, name, epodoc):
+        self.name = name
+        self.epodoc = epodoc
+
+    def __repr__(self):
+        return '<{}.{}: {}>'.format(self.__class__.__module__,
+                                    self.__class__.__name__, self.name)
