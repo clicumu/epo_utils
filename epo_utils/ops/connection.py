@@ -131,7 +131,44 @@ class OPSConnection:
             doc_object = doc_class(doc)
             fetched_documents[doc_object.id] = doc_object
 
-        return documents, response
+        return fetched_documents, response
+
+    def find_equivalents(self, number, country_code=None, id_type=None,
+                         kind_code=None, date=None):
+        """ Search EPO for equivalent documents.
+
+        Parameters
+        ----------
+        number : str, int
+            Publication number.
+        country_code : str, optional
+            Publication country code.
+        kind_code : str, optional
+            Pubication kind.
+        date : str, optional
+            YYYYMMDD-date.
+
+        Returns
+        -------
+
+        """
+        request_input = api.APIInput(
+            id_type, number, kind_code, country_code, date
+        )
+        response = self.client.fetch(api.Services.Published,
+                                     api.ReferenceType.Publication,
+                                     request_input, endpoint='equivalents')
+        soup = BeautifulSoup(response.text, 'lxml')
+        inquiry = soup.find('ops:equivalents-inquiry')
+
+        if inquiry is not None:
+            equivalents = [documents.InquiryResult(tag)
+                           for tag in inquiry.find_all('ops:inquiry-result')]
+        else:
+            equivalents = []
+
+        return equivalents, response
+
 
     def search_published(self, field, query, fetch_range=(1, 25),
                          num_publications=None, endpoint=''):
