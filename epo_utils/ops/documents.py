@@ -179,12 +179,18 @@ class ExchangeDocument(BaseEPOWrapper):
     @property
     def applicants(self):
         """ list[Party] : Applicants ordered according to patent sequence. """
-        return self._find_parties('applicants', 'applicant')
+        try:
+            return self._find_parties('applicants', 'applicant')
+        except AttributeError:  # Applicants missing.
+            return []
 
     @property
     def inventors(self):
         """ list[Party] : Inventors ordered according to patent sequence """
-        return self._find_parties('inventors', 'inventor')
+        try:
+            return self._find_parties('inventors', 'inventor')
+        except AttributeError:  # Inventors missing.
+            return []
 
     @property
     def title(self):
@@ -234,10 +240,12 @@ class ExchangeDocument(BaseEPOWrapper):
             name = re.sub(r'\s', ' ', tag.findChild('name').text).strip()
             seq = tag['sequence']
             if tag['data-format'] == 'original':
-                names[seq] = name
+                names[seq] = name if name[-1] != ',' else name[:-1]
             else:
                 epodocs[seq] = name
-        return [Party(names[key], epodocs[key]) for key in sorted(names.keys())]
+
+        return [Party(names[key], epodocs.get(key, None))
+                for key in sorted(names.keys())]
 
 
 class FullTextDocument(BaseEPOWrapper):
