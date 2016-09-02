@@ -4,9 +4,8 @@ from bs4 import BeautifulSoup
 import requests
 import logging
 
-from epo_utils.ops.documents import ExchangeDocument,\
-    OPSPublicationReference, FullTextDocument, FullTextInquiry
 from epo_utils.ops import api
+from epo_utils.ops import documents
 
 
 class ResourceNotFound(Exception):
@@ -37,47 +36,61 @@ class OPSConnection:
     def __init__(self, key, secret, **kwargs):
         self.client = api.EPOClient(key=key, secret=secret, **kwargs)
 
-    def get_publication(self, number, country_code=None, id_type=None,
-                        kind_code=None, date=None, **kwargs):
-        """ Retrieve publication and unfold response text into `dict`.
+    def get_publication_of_document_id(self, *document_ids, **kwargs):
+        """ Given instance of :class:`epo_utils.ops.documents.DocumentID`,
+        fetch corresponding document.
 
         Parameters
         ----------
-        number : str, int
-            Publication number.
-        country_code : str, optional
-            Publication country code.
-        kind_code : str, optional
-            Pubication kind.
-        date : str, optional
-            YYYYMMDD-date.
+        *document_ids : epo_utils.ops.documents.DocumentID
+            One or more document-IDs to fetch.
         **kwargs
             Keyword arguments passed to
             :meth:`epo_utils.ops.api.EPOClient.fetch`.
+
         Returns
         -------
-        documents : dict[str, ExchangeDocument]
+        fetched_documents : dict[str, ExchangeDocument]
             Documents in response.
         response : requests.Response
             Response-object.
         """
-        request_input = api.APIInput(
-            id_type, number, kind_code, country_code, date
-        )
+        inputs = [api.APIInput.from_document_id(did) for did in document_ids]
+        return self.get_publication(*inputs, **kwargs)
+
+    def get_publication(self, *request_inputs, **kwargs):
+        """ Retrieve publication and unfold response text into `dict`.
+
+        Parameters
+        ----------
+        *request_inputs : epo_utils.ops.api.APIInput
+            One or more api-inputs to fetch.
+        **kwargs
+            Keyword arguments passed to
+            :meth:`epo_utils.ops.api.EPOClient.fetch`.
+
+        Returns
+        -------
+        fetched_documents : dict[str, ExchangeDocument]
+            Documents in response.
+        response : requests.Response
+            Response-object.
+        """
         if 'endpoint' not in kwargs:
             kwargs['endpoint'] = 'biblio'
 
-        logging.info('Attempts fetch for: {}'.format(request_input.to_id()))
+        ids_debug_str = ', '.join(i.to_id() for i in request_inputs)
+        logging.info('Attempts fetch for: {}'.format(ids_debug_str))
         try:
             response = self.client.fetch(
                 api.Services.Published,
                 api.ReferenceType.Publication,
-                request_input,
+                list(request_inputs),
                 **kwargs
             )
         except requests.HTTPError as e:
             if e.response.status_code == 404:
-                logging.info('Nothing for: {}'.format(request_input.to_id()))
+                logging.info('Nothing for: {}'.format(ids_debug_str))
                 # Raise separate error if nothing was found.
                 raise ResourceNotFound(str(e))
             else:
@@ -93,30 +106,30 @@ class OPSConnection:
 
         if inner.find('exchange-document') is not None:
             tag_name = 'exchange-document'
-            doc_class = ExchangeDocument
+            doc_class = documents.ExchangeDocument
 
         elif inner.find('ftxt:fulltext-document') is not None:
             tag_name = 'ftxt:fulltext-document'
-            doc_class = FullTextDocument
+            doc_class = documents.FullTextDocument
 
         elif inner.find('ops:fulltext-inquiry') is not None:
             tag_name = 'ops:fulltext-inquiry'
-            doc_class = FullTextInquiry
+            doc_class = documents.FullTextInquiry
 
         else:
             raise UnknownDocumentFormat('no document with known format found.')
 
         if inner.find_next(tag_name).get('status') == 'not found':
             logging.info('Document not found.')
-            raise ResourceNotFound(request_input.to_id())
+            raise ResourceNotFound(ids_debug_str)
 
         logging.info('Fetch succeeded.')
         docs_xml = inner.find_all(tag_name)
 
-        documents = dict()
+        fetched_documents = dict()
         for doc in docs_xml:
             doc_object = doc_class(doc)
-            documents[doc_object.id] = doc_object
+            fetched_documents[doc_object.id] = doc_object
 
         return documents, response
 
@@ -176,10 +189,10 @@ class OPSConnection:
             soup = BeautifulSoup(response.text, 'lxml')
 
             if not endpoint:
-                results = [OPSPublicationReference(tag)
+                results = [documents.OPSPublicationReference(tag)
                            for tag in soup.find_all('ops:publication-reference')]
             else:
-                results = [ExchangeDocument(tag)
+                results = [documents.ExchangeDocument(tag)
                            for tag in soup.find_all('exchange-document')]
 
             logging.debug('{} parsed publications.'.format(len(results)))
