@@ -110,6 +110,23 @@ class APIInput:
         self.country = country
         self.date = date
 
+    @classmethod
+    def from_document_id(cls, document_id):
+        """ Convert instance of :class:`epo_utils.ops.documents.DocumentID`
+        to `APIInput`.
+
+        Parameters
+        ----------
+        document_id : epo_utils.ops.documents.DocumentID
+            Document-ID to translate.
+
+        Returns
+        -------
+        APIInput
+        """
+        return cls(document_id.id_type, document_id.doc_number,
+                   document_id.kind, document_id.country, document_id.date)
+
     def to_id(self):
         """ Format as valid API-input ID.
 
@@ -190,7 +207,7 @@ class EPOClient:
             logging.debug('Auth not provided')
             self.token = None
 
-    def fetch(self, service, ref_type, input, endpoint='',
+    def fetch(self, service, ref_type, api_input, endpoint='',
               options=None, extra_headers=None):
         """ Generic function to fetch data from the EPO-OPS API.
 
@@ -200,7 +217,7 @@ class EPOClient:
             OPS-service to fetch from.
         ref_type : ReferenceType
             OPS-reference type of data to fetch.
-        input : APIInput
+        api_input : APIInput, list[APIInput]
             Input to API-call.
         endpoint : str
             API-endpoint to call.
@@ -222,15 +239,26 @@ class EPOClient:
         if endpoint not in VALID_ENDPOINTS:
             raise ValueError('invalid endpoint: {}'.format(endpoint))
 
+        try:
+            input_text = ','.join(i.to_id() for i in api_input)
+        except TypeError:
+            input_text = api_input.to_id()
+            id_types = {api_input.id_type}
+        else:
+            id_types = {i.id_type for i in api_input}
+
+        if len(id_types) > 1:
+            raise ValueError('non-matching id-types')
+
         options = options or list()
-        url = build_ops_url(service, ref_type,
-                            input, endpoint, options)
+        url = build_ops_url(service, ref_type, id_types.pop(),
+                            endpoint, options)
 
         headers = self._make_headers(extra_headers)
 
         logging.debug('Makes request to: {}\nheaders: {}'.format(url, headers))
 
-        response = requests.get(url, headers=headers)
+        response = requests.post(url, input_text, headers=headers)
         return response
 
     def search(self, query, fetch_range, service=Services.PublishedSearch,
@@ -338,8 +366,8 @@ class EPOClient:
         return headers
 
 
-def build_ops_url(service, reference_type=None, input=None,
-                  endpoint=None, options=None, only_input_format=False):
+def build_ops_url(service, reference_type=None, id_type=None,
+                  endpoint=None, options=None):
     """ Prepare an url for calling the OPS-API.
 
     If `only_input_format` is False the URL will be formatted as::
@@ -356,8 +384,6 @@ def build_ops_url(service, reference_type=None, input=None,
         OPS-service.
     reference_type : ReferenceType, optional
         Reference type to call.
-    input : APIInput, optional
-        Call input.
     endpoint : str, optional
         Optional endpoint.
     options : list, optional
@@ -372,8 +398,7 @@ def build_ops_url(service, reference_type=None, input=None,
         URL_PREFIX,
         service.value if service is not None else None,
         reference_type.value if reference_type is not None else None,
-        input.id_type if input is not None else None,
-        input.to_id() if (input and not only_input_format) else None,
+        id_type if input is not None else None,
         endpoint,
         ','.join(options) if options is not None else None
     ]
