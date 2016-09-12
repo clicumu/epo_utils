@@ -36,35 +36,13 @@ class OPSConnection:
     def __init__(self, key, secret, **kwargs):
         self.client = api.EPOClient(key=key, secret=secret, **kwargs)
 
-    def get_publication_of_document_id(self, *document_ids, **kwargs):
-        """ Given instance of :class:`epo_utils.ops.documents.DocumentID`,
-        fetch corresponding document.
-
-        Parameters
-        ----------
-        *document_ids : epo_utils.ops.documents.DocumentID
-            One or more document-IDs to fetch.
-        **kwargs
-            Keyword arguments passed to
-            :meth:`epo_utils.ops.api.EPOClient.fetch`.
-
-        Returns
-        -------
-        fetched_documents : dict[str, ExchangeDocument]
-            Documents in response.
-        response : requests.Response
-            Response-object.
-        """
-        inputs = [api.APIInput.from_document_id(did) for did in document_ids]
-        return self.get_publication(*inputs, **kwargs)
-
     def get_publication(self, *request_inputs, **kwargs):
         """ Retrieve publication and unfold response text into `dict`.
 
         Parameters
         ----------
-        *request_inputs : epo_utils.ops.api.APIInput
-            One or more api-inputs to fetch.
+        *request_inputs : epo_utils.ops.api.APIInput, epo_utils.ops.documents.DocumentID
+            One or more api-inputs or document-ID:s to fetch.
         **kwargs
             Keyword arguments passed to
             :meth:`epo_utils.ops.api.EPOClient.fetch`.
@@ -76,6 +54,12 @@ class OPSConnection:
         response : requests.Response
             Response-object.
         """
+        if all(isinstance(in_, documents.DocumentID) for in_ in request_inputs):
+            request_inputs = [api.APIInput.from_document_id(did)
+                              for did in request_inputs]
+        elif not all(isinstance(in_, api.APIInput) for in_ in request_inputs):
+            raise ValueError('inputs must be APIInput-instances.')
+
         if 'endpoint' not in kwargs:
             kwargs['endpoint'] = 'biblio'
 
@@ -133,42 +117,52 @@ class OPSConnection:
 
         return fetched_documents, response
 
-    def find_equivalents(self, number, country_code=None, id_type=None,
-                         kind_code=None, date=None):
+    def find_equivalents(self, *request_inputs):
         """ Search EPO for equivalent documents.
+
+        Simple call to OPS equivalents endpoint is done. Currently no
+        support for combined endpoints.
 
         Parameters
         ----------
-        number : str, int
-            Publication number.
-        country_code : str, optional
-            Publication country code.
-        kind_code : str, optional
-            Pubication kind.
-        date : str, optional
-            YYYYMMDD-date.
+        *request_inputs : epo_utils.ops.api.APIInput, epo_utils.ops.documents.DocumentID
+            One or more api-inputs or document-ID:s to fetch
 
         Returns
         -------
-
+        dict[epo_utils.ops.api.APIInput, epo_utils.ops.documents.InquiryResult]
+        requests.Response
         """
-        request_input = api.APIInput(
-            id_type, number, kind_code, country_code, date
-        )
-        response = self.client.fetch(api.Services.Published,
-                                     api.ReferenceType.Publication,
-                                     request_input, endpoint='equivalents')
-        soup = BeautifulSoup(response.text, 'lxml')
-        inquiry = soup.find('ops:equivalents-inquiry')
+        if all(isinstance(in_, documents.DocumentID) for in_ in request_inputs):
+            request_inputs = [api.APIInput.from_document_id(did)
+                              for did in request_inputs]
+        elif not all(isinstance(in_, api.APIInput) for in_ in request_inputs):
+            raise ValueError('inputs must be APIInput-instances.')
 
-        if inquiry is not None:
-            equivalents = [documents.InquiryResult(tag)
-                           for tag in inquiry.find_all('ops:inquiry-result')]
-        else:
-            equivalents = []
+        equivalents = dict()
+
+        # OPS-endpoint equivalents does not support bulk-retrieval, it only
+        # returns results from the first ID requested. Therefore, one call
+        # must be made for each input.
+        for request_input in request_inputs:
+            response = self.client.fetch(api.Services.Published,
+                                         api.ReferenceType.Publication,
+                                         request_input,
+                                         endpoint='equivalents')
+            soup = BeautifulSoup(response.text, 'lxml')
+            inquiry = soup.find('ops:equivalents-inquiry')
+
+            if inquiry is not None:
+                req_equivalents = [
+                    documents.InquiryResult(tag)
+                    for tag in inquiry.find_all('ops:inquiry-result')
+                ]
+            else:
+                req_equivalents = []
+
+            equivalents[request_input] = req_equivalents
 
         return equivalents, response
-
 
     def search_published(self, field, query, fetch_range=(1, 25),
                          num_publications=None, endpoint=''):
