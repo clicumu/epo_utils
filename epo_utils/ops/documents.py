@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """ This module contain wrapper classes for EPO patent documents. """
 import re
-import unicodedata
 from collections import namedtuple
 
 
@@ -371,6 +370,15 @@ class InquiryResult(DocumentID):
     def __init__(self, xml, **kwargs):
         super(InquiryResult, self).__init__(xml.findChild('document-id'),
                                             **kwargs)
+
+    @property
+    def country(self):
+        country = super(InquiryResult, self).country
+
+        # Country might be missing, but ID-number might start with
+        # country code.
+        if not country and self.id[:2].isalpha():
+            return self.id[:2]
 
 
 class OPSPublicationReference(DocumentID):
