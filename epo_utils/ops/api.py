@@ -4,8 +4,15 @@
 This module contain classes and functions to get data from
 [EPO-OPS API](http://www.epo.org/searching-for-patents/technical/espacenet/ops.html)
 """
-import requests
+import logging
+import time
+import re
+from datetime import datetime, timedelta
+from collections import namedtuple
+from base64 import b64encode
 import enum
+
+import requests
 try:
     import requests_cache
 except ImportError:
@@ -13,10 +20,7 @@ except ImportError:
 else:
     _HAS_CACHE = True
 
-import logging
-from datetime import datetime, timedelta
-from collections import namedtuple
-from base64 import b64encode
+from epo_utils.ops.documents import DocumentID
 
 
 AUTH_URL = 'https://ops.epo.org/3.1/auth/accesstoken'
@@ -124,6 +128,9 @@ class APIInput:
         -------
         APIInput
         """
+        if not isinstance(document_id, DocumentID):
+            raise ValueError('document_id must be DocumentID-instance')
+
         return cls(document_id.id_type, document_id.doc_number,
                    document_id.kind, document_id.country, document_id.date)
 
@@ -182,6 +189,8 @@ class EPOClient:
     secret : str
     key : str
     token : Token or None
+    quota_per_hour_used : int
+    quota_per_week_used : int
     """
 
     def __init__(self, accept_type='xml', key=None, secret=None, cache=False,
@@ -200,12 +209,24 @@ class EPOClient:
 
         self.secret = secret
         self.key = key
+        self.quota_per_hour_used = 0
+        self.quota_per_week_used = 0
+
         if all([secret, key]):
             logging.debug('Auth provided.')
             self.token = self.authenticate()
         else:
             logging.debug('Auth not provided')
             self.token = None
+
+        self._last_call = {
+            'search': None,
+            'retrieval': None,
+            'inpadoc': None,
+            'images': None,
+            'other': None
+        }
+        self._next_call = self._last_call.copy()
 
     def fetch(self, service, ref_type, api_input, endpoint='',
               options=None, extra_headers=None):
@@ -258,7 +279,7 @@ class EPOClient:
 
         logging.debug('Makes request to: {}\nheaders: {}'.format(url, headers))
 
-        response = requests.post(url, input_text, headers=headers)
+        response = self.post('retrieval', url, input_text, headers=headers)
         return response
 
     def search(self, query, fetch_range, service=Services.PublishedSearch,
@@ -303,9 +324,7 @@ class EPOClient:
         url = build_ops_url(service, options=endpoint)
 
         logging.info('Sends query: {}'.format(query))
-        response = requests.post(url, headers=headers,
-                                 data={'q': query})
-        response.raise_for_status()
+        response = self.post('search', url, headers=headers, data={'q': query})
         logging.info('Query successful.')
 
         return response
@@ -340,6 +359,106 @@ class EPOClient:
         expires = datetime.now() + timedelta(seconds=expires_in)
         token = Token(token, expires)
         return token
+
+    def post(self, service, *args, **kwargs):
+        """ Makes an auto-throttled POST to the OPS-API.
+
+        Parameters
+        ----------
+        service : str
+            OPS-system called.
+        *args
+            Positional arguments passed to :py:`requests.post`
+        **kwargs
+            Keyword arguments passed to :py:`requests.post`
+
+        Returns
+        -------
+        requests.Response
+        """
+        logging.debug(
+            '{} POST\nargs: {}\nkwargs: {}'.format(service,args, kwargs))
+
+        response = self._throttled_call(service, requests.post, *args, **kwargs)
+        response.raise_for_status()
+
+        return response
+
+    def get(self, service, *args, **kwargs):
+        """ Makes an auto-throttled GET-call to the OPS-API.
+
+        Parameters
+        ----------
+        service : str
+            OPS-system called.
+        *args
+            Positional arguments passed to :py:`requests.get`
+        **kwargs
+            Keyword arguments passed to :py:`requests.get`
+
+        Returns
+        -------
+        requests.Response
+        """
+        logging.debug(
+            '{} POST\nargs: {}\nkwargs: {}'.format(service, args, kwargs))
+
+        response = self._throttled_call(service, requests.get, *args, **kwargs)
+        response.raise_for_status()
+
+        return response
+
+    def _throttled_call(self, service, request, *args, **kwargs):
+        """
+
+        Parameters
+        ----------
+        service : str
+        request : Callable
+        *args
+            Positional arguments passed to `request`
+        **kwargs
+            Keyword arguments passed to :py:`request`
+
+        Returns
+        -------
+        requests.Response
+        """
+        logging.debug('Throttle with: {}'.format(service))
+        if service not in self._last_call:
+            raise ValueError('Invalid service: {}'.format(service))
+
+        next_call = self._next_call[service]
+        now = datetime.now()
+
+        if next_call is not None and now < next_call:
+            diff = next_call - now
+            time.sleep(diff.seconds + diff.microseconds / 1e6)
+
+        self._last_call[service] = datetime.now()
+        response = request(*args, **kwargs)
+
+        # The OPS-API sets its request-limit by minute, which is updated
+        # for each call. Therefore, the throttling delay is set to
+        # 60 sec / calls per minute.
+        throttle_header = response.headers['X-Throttling-Control']
+        pattern = r'{}=([a-z]+):(\d+)'.format(service)
+        color, n_str = re.search(pattern, throttle_header).groups()
+        n_per_min = int(n_str)
+        delay = 60 / n_per_min  # Delay in seconds.
+        seconds = int(delay)
+        milliseconds = int((delay - seconds) * 1e3)
+        next_delta = timedelta(seconds=seconds, milliseconds=milliseconds)
+
+        self._next_call[service] = self._last_call[service] + next_delta
+
+        # Update quota used.
+        q_per_h = int(response.headers['X-IndividualQuotaPerHour-Used'])
+        q_per_w = int(response.headers['X-RegisteredQuotaPerWeek-Used'])
+        self.quota_per_hour_used = q_per_h
+        self.quota_per_week_used = q_per_w
+
+        return response
 
     def _make_headers(self, extras=None):
         """ Prepare request headers.
