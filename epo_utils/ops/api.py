@@ -166,6 +166,11 @@ class APIInput:
 
         return id_
 
+    def __eq__(self, other):
+        if not isinstance(other, APIInput):
+            return False
+        return self.to_id() == other.to_id() and self.id_type == other.id_type
+
     def __repr__(self):
         module = self.__class__.__module__
         class_name = self.__class__.__name__
