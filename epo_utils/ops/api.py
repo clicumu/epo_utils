@@ -163,6 +163,11 @@ class APIInput:
 
         return id_
 
+    def __repr__(self):
+        module = self.__class__.__module__
+        class_name = self.__class__.__name__
+        return '<{0}.{1}: {2}>'.format(module, class_name, self.to_id())
+
 
 Token = namedtuple('Token', ['token', 'expires'])
 
