@@ -29,7 +29,7 @@ AUTH_URL = 'https://ops.epo.org/3.1/auth/accesstoken'
 URL_PREFIX = 'https://ops.epo.org/3.1/rest-services'
 """ str: Base URL for all calls to API. """
 
-VALID_ENDPOINTS = [
+VALID_ENDPOINTS = frozenset((
     'fulltext',
     'claims',
     'description',
@@ -37,12 +37,15 @@ VALID_ENDPOINTS = [
     'equivalents',
     'biblio',
     'abstract',
-    '',
-]
-""" list[str] : EPO:s available API endpoints."""
+    ''
+))
+""" frozenset[str] : EPO:s available API endpoints."""
 
-VALID_IDTYPES = ('epodoc', 'docdb', 'original', 'classification')
-""" list[str] : Valid API-input formats. """
+VALID_IDTYPES = frozenset(('epodoc', 'docdb', 'original', 'classification'))
+""" frozenset[str] : Valid API-input formats. """
+
+HAS_FULLTEXT = frozenset(('EP', 'WO', 'AT', 'CA', 'CH', 'GB', 'ES'))
+""" frozenset[str] : Country codes supporting full-text inquiry (OPS v3.1) """
 
 
 class Services(enum.Enum):
@@ -197,6 +200,7 @@ class EPOClient:
     quota_per_hour_used : int
     quota_per_week_used : int
     """
+    HAS_FULLTEXT = {'EP'}
 
     def __init__(self, accept_type='xml', key=None, secret=None, cache=False,
                  cache_kwargs=None):
