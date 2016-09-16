@@ -48,6 +48,10 @@ HAS_FULLTEXT = frozenset(('EP', 'WO', 'AT', 'CA', 'CH', 'GB', 'ES'))
 """ frozenset[str] : Country codes supporting full-text inquiry (OPS v3.1) """
 
 
+class FetchFailed(Exception):
+    """ Raised at 404:s. """
+
+
 class Services(enum.Enum):
     """ EPO-OPS service - service url-infix mapping."""
     Family = 'family'
@@ -150,26 +154,25 @@ class APIInput:
         else:
             number = self.number
 
-        parts = (part for part in [self.country, number, self.kind, self.date]
-                 if part is not None)
+        parts = [part for part in [self.country, number, self.kind, self.date]
+                 if part is not None]
 
         if self.id_type == 'original':
             id_ = '.'.join(parts).replace(' ', '%20')
         elif self.id_type == 'docdb':
             id_ = '.'.join(parts)
         elif self.id_type == 'epodoc':
-            id_ = ''.join(parts)
+            if self.date is not None:
+                id_ = ''.join(parts[:-1])
+                id_ += '.' + self.date
+            else:
+                id_ = ''.join(parts)
         elif self.id_type == 'classification':
             return number
         else:
             raise ValueError('invalid id_type: {}'.format(self.id_type))
 
         return id_
-
-    def __eq__(self, other):
-        if not isinstance(other, APIInput):
-            return False
-        return self.to_id() == other.to_id() and self.id_type == other.id_type
 
     def __repr__(self):
         module = self.__class__.__module__
@@ -293,7 +296,15 @@ class EPOClient:
 
         logging.debug('Makes request to: {}\nheaders: {}'.format(url, headers))
 
-        response = self.post('retrieval', url, input_text, headers=headers)
+        try:
+            response = self.post('retrieval', url, input_text, headers=headers)
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                logging.error('{} not found'.format(input_text))
+                raise FetchFailed(input_text)
+            else:
+                raise
+
         return response
 
     def search(self, query, fetch_range, service=Services.PublishedSearch,
@@ -394,7 +405,6 @@ class EPOClient:
             '{} POST\nargs: {}\nkwargs: {}'.format(service,args, kwargs))
 
         response = self._throttled_call(service, requests.post, *args, **kwargs)
-        response.raise_for_status()
 
         return response
 
@@ -415,10 +425,9 @@ class EPOClient:
         requests.Response
         """
         logging.debug(
-            '{} POST\nargs: {}\nkwargs: {}'.format(service, args, kwargs))
+            '{} GET\nargs: {}\nkwargs: {}'.format(service, args, kwargs))
 
         response = self._throttled_call(service, requests.get, *args, **kwargs)
-        response.raise_for_status()
 
         return response
 
@@ -428,7 +437,9 @@ class EPOClient:
         Parameters
         ----------
         service : str
+            OPS-service to call.
         request : Callable
+            Function which calls the OPS-API using `*args` and `**kwargs`.
         *args
             Positional arguments passed to `request`
         **kwargs
@@ -451,6 +462,7 @@ class EPOClient:
 
         self._last_call[service] = datetime.now()
         response = request(*args, **kwargs)
+        response.raise_for_status()
 
         # The OPS-API sets its request-limit by minute, which is updated
         # for each call. Therefore, the throttling delay is set to
