@@ -3,6 +3,7 @@
 from bs4 import BeautifulSoup
 import requests
 import logging
+import collections
 
 from epo_utils.ops import api
 from epo_utils.ops import documents
@@ -58,6 +59,7 @@ class OPSConnection:
             request_inputs = [api.APIInput.from_document_id(did)
                               for did in request_inputs]
         elif not all(isinstance(in_, api.APIInput) for in_ in request_inputs):
+            logging.debug('Bad input: '.format(request_inputs))
             raise ValueError('inputs must be APIInput-instances.')
 
         if 'endpoint' not in kwargs:
@@ -233,3 +235,91 @@ class OPSConnection:
                 break
 
         return end_results, response
+
+    def find_fulltext(self, request_input, endpoint):
+        """
+
+        Parameters
+        ----------
+        request_input : APIInput/DocumentID, list[APIInput]/list[DocumentID]
+
+        endpoint: str, tuple[str]
+
+        Returns
+        -------
+
+        """
+        if not isinstance(request_input, collections.Sequence):
+            request_input = [request_input]
+
+        if all(isinstance(in_, documents.DocumentID) for in_ in request_input):
+            request_input = [api.APIInput.from_document_id(did)
+                              for did in request_input]
+        elif not all(isinstance(in_, api.APIInput) for in_ in request_input):
+            raise ValueError('inputs must be APIInput-instances.')
+
+        Result = collections.namedtuple(
+            '{}Result'.format(endpoint.capitalize()),
+            ['substitution', 'text_instance']
+        )
+
+        # Since OPS-fulltext only supports a few country codes, try to find
+        # patent-equivalents from supported countries...
+        lacking_fulltext = [in_ for in_ in request_input
+                            if in_.country not in api.HAS_FULLTEXT]
+
+        # ... Also find patents with correct country codes which lacks
+        # full-text anyway.
+        lacking_fulltext += [in_ for in_ in request_input
+                             if in_ not in lacking_fulltext
+                             and not self._has_fulltext(in_, endpoint)]
+
+        # Find equivalent patents which do have the searched full-text.
+        lacking_fulltext_eqv, _ = self.find_equivalents(*lacking_fulltext)
+        substitutions = dict()
+        for input_, equivalents in lacking_fulltext_eqv.items():
+            in_correct_country = [eq for eq in equivalents
+                                  if eq.country in api.HAS_FULLTEXT]
+            has_fulltext = (eq for eq in in_correct_country
+                            if self._has_fulltext(eq, 'claims'))
+            sub_w_fulltext = next(has_fulltext, None)
+            substitutions[input_] = sub_w_fulltext
+
+        results = dict()
+
+        # And finally collect the full-text instances.
+        non_replaced = list(set(request_input) - set(lacking_fulltext))
+        for input_ in non_replaced:
+            ft_dict, _ = self.get_publication(input_, endpoint=endpoint)
+            ft_instance = next(val for val in ft_dict.values())
+            results[input_] = Result(None, ft_instance)
+
+        for input_, substitution in substitutions.items():
+            if substitution is None:
+                results[input_] = Result(None, None)
+            else:
+                ft_dict, _ = self.get_publication(substitution, endpoint=endpoint)
+                ft_instance = next(val for val in ft_dict.values())
+                results[input_] = Result(api.APIInput.from_document_id(substitution),
+                                         ft_instance)
+
+        return results
+
+    def _has_fulltext(self, api_input, endpoint):
+        """
+
+        Parameters
+        ----------
+        api_input
+
+        Returns
+        -------
+
+        """
+        try:
+            ft_inquiry_d, _ = self.get_publication(api_input, endpoint='fulltext')
+        except api.FetchFailed:
+            return False
+        ft_inquiry = next(val for val in ft_inquiry_d.values())
+
+        return any(t.desc == endpoint for t in ft_inquiry.full_text_instances)
