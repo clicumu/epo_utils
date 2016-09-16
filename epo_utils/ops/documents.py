@@ -250,11 +250,11 @@ class ExchangeDocument(BaseEPOWrapper):
 class FullTextDocument(BaseEPOWrapper):
 
     """ Wrapper around `ftxt:fulltext-document`-tag. """
-    _id = 'doc_number'
+    _id = 'full_id'
 
     @property
-    def doc_number(self):
-        return self.publication_reference.doc_number
+    def full_id(self):
+        return self.publication_reference.full_id
 
     @property
     def publication_reference(self):
@@ -265,6 +265,10 @@ class FullTextDocument(BaseEPOWrapper):
     def description(self):
         """ str: `description-tag`"""
         all_descriptions = self.xml.find_all('description')
+
+        if not all_descriptions:
+            return None
+
         description = next(
             (desc for desc in all_descriptions
              if desc.get('lang', '').lower() == self.language_code),
@@ -326,7 +330,11 @@ class DocumentID(BaseEPOWrapper):
     """
     Wrapper around `document-id`-tag.
     """
-    _id = 'doc_number'
+    _id = 'full_id'
+
+    @property
+    def full_id(self):
+        return ''.join(filter(None, [self.country, self.doc_number, self.kind]))
 
     @property
     def id_type(self):
@@ -370,15 +378,23 @@ class InquiryResult(DocumentID):
     def __init__(self, xml, **kwargs):
         super(InquiryResult, self).__init__(xml.findChild('document-id'),
                                             **kwargs)
+        doc_number = super(InquiryResult, self).doc_number
+        if doc_number[:2].isalpha():
+            self._country = doc_number[:2]
+            self._doc_number = doc_number[2:]
+        else:
+            self._country = super(InquiryResult, self).country
+            self._doc_number = doc_number
 
     @property
     def country(self):
-        country = super(InquiryResult, self).country
+        """ str: Country code. """
+        return self._country
 
-        # Country might be missing, but ID-number might start with
-        # country code.
-        if not country and self.id[:2].isalpha():
-            return self.id[:2]
+    @property
+    def doc_number(self):
+        """ str: Document number. """
+        return self._doc_number
 
 
 class OPSPublicationReference(DocumentID):
@@ -392,6 +408,16 @@ class OPSPublicationReference(DocumentID):
     def id_type(self):
         """ str: `document-id-type`-attribute. """
         return self.xml.findChild('document-id')['document-id-type']
+
+
+class PublicationReference(DocumentID):
+
+    """ Wraps `publication-reference`-tag. """
+
+    @property
+    def id_type(self):
+        """ str: ID-type. """
+        return self.xml['data-format']
 
 
 class ApplicationReference(BaseEPOWrapper):
