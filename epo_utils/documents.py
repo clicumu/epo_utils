@@ -150,17 +150,24 @@ class ExchangeDocument(BaseEPOWrapper):
             classifications['IPCR'] = [' '.join(tag.text.split())
                                        for tag in ipcr.find_all('text')]
 
-        others = self.xml.findChild(
-            'patent-classifications'
-        ).find_all('patent-classification')
-        if others is not None:
+        classes = self.xml.findChild('patent-classifications')
+        cpc_tags = [c for c in classes.find_all('patent-classification')
+                    if c.findChild('classification-scheme')['scheme'] == 'CPC']
+        if cpc_tags:
             cpc_classes = list()
-            for other in others:
+            for other in cpc_tags:
                 cpc_class = '{}{}{}{}{}/{} {}'.format(
                     *[c.text for c in other.children if hasattr(c, 'text')])
                 cpc_classes.append(cpc_class)
 
             classifications['CPC'] = cpc_classes
+
+        uc_tags = [c for c in classes.find_all('patent-classification')
+                   if c.findChild('classification-scheme')['scheme'] == 'UC']
+        if uc_tags:
+            uc_classes = [tag.findChild('classification-symbol').text
+                          for tag in uc_tags]
+            classifications['UC'] = uc_classes
 
         return classifications
 
