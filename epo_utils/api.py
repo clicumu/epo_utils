@@ -136,7 +136,10 @@ class Token(namedtuple('Token', ['token', 'expires'])):
 
 
 class EPOClient:
-    """ A simple client to call EPO-OPS REST-API using `requests`.
+    """ Client to call EPO-OPS REST-API using `requests`.
+
+    Features auto-throttling based on OPS throttling headers and
+    automatic retries on server-side error codes.
 
     Parameters
     ----------
@@ -188,6 +191,8 @@ class EPOClient:
 
         self.secret = secret
         self.key = key
+        self.max_retries = max_retries
+        self.retry_timeout = retry_timeout
         self.quota_per_hour_used = 0
         self.quota_per_week_used = 0
 
@@ -257,7 +262,7 @@ class EPOClient:
         headers = self._make_headers(extra_headers)
 
         logging.debug('Makes request to: {}\nheaders: {}'.format(url, headers))
-
+        logging.info('fetches {}'.format(input_text))
         try:
             response = self.post('retrieval', url, input_text, headers=headers)
         except requests.HTTPError as e:
@@ -266,7 +271,7 @@ class EPOClient:
                 raise FetchFailed(input_text)
             else:
                 raise
-
+        logging.info('Fetch succeeded.')
         return response
 
     def search(self, query, fetch_range, service=Services.PublishedSearch,
@@ -366,7 +371,8 @@ class EPOClient:
         logging.debug(
             '{} POST\nargs: {}\nkwargs: {}'.format(service,args, kwargs))
 
-        response = self._throttled_call(service, requests.post, *args, **kwargs)
+        response = self._retry(self._throttled_call, service, requests.post,
+                               *args, **kwargs)
 
         return response
 
@@ -389,12 +395,46 @@ class EPOClient:
         logging.debug(
             '{} GET\nargs: {}\nkwargs: {}'.format(service, args, kwargs))
 
-        response = self._throttled_call(service, requests.get, *args, **kwargs)
+        response = self._retry(self._throttled_call, service, requests.get,
+                               *args, **kwargs)
 
         return response
 
-    def _throttled_call(self, service, request, *args, **kwargs):
+    def _retry(self, request, *args, **kwargs):
+        """ Wrap `request` with retries at 500-responses.
+
+        Parameters
+        ----------
+        request : Callable
+            Function which calls the OPS-API using `*args` and `**kwargs`.
+        *args
+            Positional arguments passed to `request`
+        **kwargs
+            Keyword arguments passed to :py:`request`
+
+        Returns
+        -------
+        Any
+            result from `request`
         """
+        for attempts_left in range(self.max_retries + 1, -1, -1):
+            try:
+                result = request(*args, **kwargs)
+            except requests.HTTPError as e:
+                if e.response.status_code >= 500 and attempts_left > 0:
+                    logging.info(
+                        'Server error ({} attempts left). Timeouts and retries '
+                        'in {}.'.format(attempts_left, self.retry_timeout))
+                    time.sleep(self.retry_timeout)
+                else:
+                    raise
+            else:
+                break
+
+        return result
+
+    def _throttled_call(self, service, request, *args, **kwargs):
+        """ Wrap `request` with auto-throttle.
 
         Parameters
         ----------
@@ -549,8 +589,10 @@ def raise_for_quota_rejection(response):
         return
 
     if rejection == 'RegisteredQuotaPerWeek':
+        logging.error('quota per week exceeded')
         raise QuotaPerWeekExceeded(response.text)
     elif rejection == 'IndividualQuotaPerHour':
+        logging.error('quota per hour exceeded')
         raise QuotaPerHourExceeded(response.text)
     else:
         # Anonymous user-headers skipped since anonymous use will be
