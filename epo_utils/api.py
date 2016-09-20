@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 import requests
 
-from epo_utils.constants import AUTH_URL, URL_PREFIX, VALID_ENDPOINTS, \
+from .constants import AUTH_URL, URL_PREFIX, VALID_ENDPOINTS, \
     VALID_IDTYPES
 from epo_utils.exceptions import FetchFailed, QuotaPerHourExceeded, \
     QuotaPerWeekExceeded
@@ -26,7 +26,7 @@ except ImportError:
 else:
     _HAS_CACHE = True
 
-from epo_utils.documents import DocumentID
+from .documents import DocumentID
 
 
 class APIInput:

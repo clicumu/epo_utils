@@ -534,7 +534,7 @@ class Party:
     ----------
     name : str
         Name in `original`-format.
-    epodic : str
+    epodoc : str
         Name in `epodoc`-format.
     """
     def __init__(self, name, epodoc):

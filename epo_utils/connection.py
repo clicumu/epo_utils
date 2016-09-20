@@ -6,10 +6,11 @@ import logging
 import requests
 from bs4 import BeautifulSoup
 
-from .exceptions import ResourceNotFound, UnknownDocumentFormat
+from .exceptions import ResourceNotFound, UnknownDocumentFormat, FetchFailed
 from . import ops
 from . import documents
 from . import api
+from . import constants
 
 
 class OPSConnection:
@@ -172,7 +173,7 @@ class OPSConnection:
 
         Parameters
         ----------
-        field : epo_utils.ops.api.SearchFields
+        field : epo_utils.ops.SearchFields
             EPO-OPS search field.
         query : str
             Query-parameter of full query if  `field` is `SearchFields.CQL`.
@@ -261,7 +262,7 @@ class OPSConnection:
         # Since OPS-fulltext only supports a few country codes, try to find
         # patent-equivalents from supported countries...
         lacking_fulltext = [in_ for in_ in request_input
-                            if in_.country not in epo_utils.constants.HAS_FULLTEXT]
+                            if in_.country not in constants.HAS_FULLTEXT]
 
         # ... Also find patents with correct country codes which lacks
         # full-text anyway.
@@ -274,7 +275,7 @@ class OPSConnection:
         substitutions = dict()
         for input_, equivalents in lacking_fulltext_eqv.items():
             in_correct_country = [eq for eq in equivalents
-                                  if eq.country in epo_utils.constants.HAS_FULLTEXT]
+                                  if eq.country in constants.HAS_FULLTEXT]
             has_fulltext = (eq for eq in in_correct_country
                             if self._has_fulltext(eq, 'claims'))
             sub_w_fulltext = next(has_fulltext, None)
@@ -314,7 +315,7 @@ class OPSConnection:
         """
         try:
             ft_inquiry_d, _ = self.get_publication(api_input, endpoint='fulltext')
-        except epo_utils.exceptions.FetchFailed:
+        except FetchFailed:
             return False
         ft_inquiry = next(val for val in ft_inquiry_d.values())
 
