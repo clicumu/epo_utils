@@ -8,7 +8,7 @@ def filter_language(docs, attribute, lang='en', filter_empty=True):
 
     Parameters
     ----------
-    docs : Sequence[api.ops.documents.ExchangeDocument]
+    docs : Sequence[documents.ExchangeDocument]
         Documents to filter.
     attribute : str
         Text attribute to filter on.

@@ -5,14 +5,19 @@ This module contain classes and functions to get data from
 [EPO-OPS API](http://www.epo.org/searching-for-patents/technical/espacenet/ops.html)
 """
 import logging
-import time
 import re
-from datetime import datetime, timedelta
-from collections import namedtuple
+import time
 from base64 import b64encode
-import enum
+from collections import namedtuple
+from datetime import datetime, timedelta
 
 import requests
+
+from epo_utils.constants import AUTH_URL, URL_PREFIX, VALID_ENDPOINTS, \
+    VALID_IDTYPES
+from epo_utils.exceptions import FetchFailed
+from epo_utils.ops import Services, ReferenceType
+
 try:
     import requests_cache
 except ImportError:
@@ -20,83 +25,28 @@ except ImportError:
 else:
     _HAS_CACHE = True
 
-from epo_utils.ops.documents import DocumentID
-
-
-AUTH_URL = 'https://ops.epo.org/3.1/auth/accesstoken'
-""" str : Authorization URL. """
-
-URL_PREFIX = 'https://ops.epo.org/3.1/rest-services'
-""" str: Base URL for all calls to API. """
-
-VALID_ENDPOINTS = frozenset((
-    'fulltext',
-    'claims',
-    'description',
-    'images',
-    'equivalents',
-    'biblio',
-    'abstract',
-    ''
-))
-""" frozenset[str] : EPO:s available API endpoints."""
-
-VALID_IDTYPES = frozenset(('epodoc', 'docdb', 'original', 'classification'))
-""" frozenset[str] : Valid API-input formats. """
-
-HAS_FULLTEXT = frozenset(('EP', 'WO', 'AT', 'CA', 'CH', 'GB', 'ES'))
-""" frozenset[str] : Country codes supporting full-text inquiry (OPS v3.1) """
-
-
-class FetchFailed(Exception):
-    """ Raised at 404:s. """
-
-
-class Services(enum.Enum):
-    """ EPO-OPS service - service url-infix mapping."""
-    Family = 'family'
-    Numbers = 'number-service'
-    Published = 'published-data'
-    PublishedSearch = 'published-data/search'
-    Register = 'register'
-    RegisterSearch = 'register/search'
-    Classification = 'classification/cpc'
-
-
-class ReferenceType(enum.Enum):
-    """ EPO-OPS API-call reference-types. """
-    Publication = 'publication'
-    Application = 'application'
-    Priority = 'priority'
-
-
-class SearchFields(enum.Enum):
-    """
-    CQL search field identifiers according to:
-    https://worldwide.espacenet.com/help?locale=en_EP&method=handleHelpTopic&topic=fieldidentifier
-    """
-    Inventor = 'in'
-    Applicant = 'pa'
-    Title = 'ti'
-    Abstract = 'ab'
-    PriorityNumber = 'pr'
-    PublicationNumber = 'pn'
-    ApplicationNumber = 'ap'
-    PublicationDate = 'pd'
-    CitedDocument = 'ct'
-    CooperativePatentClassification = 'cpc'
-    InventorAndApplicant = 'ia'
-    TitleAbstract = 'ta'
-    TitleAbstractInventorApplicant = 'txt'
-    ApplicationPublicationPriority = 'num'
-    IPC = 'ipc'
-    ICPCPC = 'cl'
-    CQL = 'cql'
+from epo_utils.documents import DocumentID
 
 
 class APIInput:
     """
-    Simple wrapper around API-input.
+    Encapsulation of API-input.
+
+    Provides ID-formatting and interface
+    to :class:`epo_utils.documents.DocumentID`.
+
+    Attributes
+    ----------
+    id_type : str
+        ID-format (epodoc, docdb, original).
+    number : str
+        Document number.
+    kind : str
+        Document kind code.
+    country : str
+        Country code.
+    date : str
+        Date as YYYYMMDD-string.
     """
     def __init__(self, id_type, number, kind=None, country=None, date=None):
         if id_type not in VALID_IDTYPES:
@@ -123,12 +73,12 @@ class APIInput:
 
     @classmethod
     def from_document_id(cls, document_id):
-        """ Convert instance of :class:`epo_utils.ops.documents.DocumentID`
+        """ Convert instance of :class:`epo_utils.documents.DocumentID`
         to `APIInput`.
 
         Parameters
         ----------
-        document_id : epo_utils.ops.documents.DocumentID
+        document_id : epo_utils.documents.DocumentID
             Document-ID to translate.
 
         Returns
@@ -180,7 +130,8 @@ class APIInput:
         return '<{0}.{1}: {2}>'.format(module, class_name, self.to_id())
 
 
-Token = namedtuple('Token', ['token', 'expires'])
+class Token(namedtuple('Token', ['token', 'expires'])):
+    """ Wrapper around access-token. """
 
 
 class EPOClient:
@@ -251,9 +202,9 @@ class EPOClient:
 
         Parameters
         ----------
-        service : Services
+        service : epo_utils.ops.Services
             OPS-service to fetch from.
-        ref_type : ReferenceType
+        ref_type : epo_utils.ops.ReferenceType
             OPS-reference type of data to fetch.
         api_input : APIInput, list[APIInput]
             Input to API-call.
@@ -552,15 +503,3 @@ def build_ops_url(service, reference_type=None, id_type=None,
     logging.debug('Built url: {}'.format(url))
     return url
 
-
-__all__ = [
-    AUTH_URL,
-    URL_PREFIX,
-    VALID_ENDPOINTS,
-    Services,
-    ReferenceType,
-    SearchFields,
-    EPOClient,
-    Token,
-    APIInput
-]

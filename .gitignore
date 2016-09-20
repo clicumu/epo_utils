@@ -3,5 +3,5 @@ scripts/
 
 *.pyc
 *.sqlite
-/epo_utils/ops/tests/.hypothesis/
-/epo_utils/ops/tests/cache.sqlite
+/epo_utils/tests/.hypothesis/
+/epo_utils/tests/cache.sqlite

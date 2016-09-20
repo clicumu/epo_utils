@@ -2,10 +2,12 @@
 Util-function and Hypothesis builders.
 """
 import string
+
+import epo_utils.ops.constants
 from hypothesis import strategies as st
 from hypothesis.extra import datetime as hyp_datetime
-from epo_utils.ops import api
 
+from epo_utils.ops import api
 
 _non_whitespace = string.printable.replace(string.whitespace, '')
 
@@ -19,7 +21,7 @@ def doc_numbers():
 
 def valid_api_input_args():
     """ Args-tuple builder for `epo_utils.ops.api.APIInput` """
-    id_type = st.sampled_from(api.VALID_IDTYPES)
+    id_type = st.sampled_from(epo_utils.constants.VALID_IDTYPES)
     number = doc_numbers()
     kind = st.one_of(
         st.text(min_size=1, alphabet=_non_whitespace),
@@ -58,6 +60,12 @@ def valid_epo_client_args(enable_cache=True, must_have_auth=False):
     cache = st.booleans() if enable_cache else st.just(False)
     cache_kwargs = st.one_of(st.none(), st.dictionaries(st.text(), st.text()))
     return st.tuples(accept_type, key, secret, cache, cache_kwargs)
+
+
+def build_variable_tuples(strategy, max_length=100):
+    """ Build variable length tuples of strategy. """
+    return st.builds(lambda n: tuple(strategy for i in range(n)),
+                     st.integers(min_value=0, max_value=max_length))
 
 
 APIInputs = st.builds(lambda args: api.APIInput(*args), valid_api_input_args())

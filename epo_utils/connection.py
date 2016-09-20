@@ -1,20 +1,18 @@
 # -*- coding: utf-8 -*-
 """ This module contains classes for high-level access to EPO-OPS. """
-from bs4 import BeautifulSoup
-import requests
-import logging
 import collections
+import logging
 
-from epo_utils.ops import api
-from epo_utils.ops import documents
+import epo_utils.ops.constants
+import epo_utils.ops.exceptions
+import requests
+from bs4 import BeautifulSoup
 
+import epo_utils.ops
+from epo_utils.exceptions import ResourceNotFound, UnknownDocumentFormat
 
-class ResourceNotFound(Exception):
-    pass
-
-
-class UnknownDocumentFormat(Exception):
-    pass
+from epo_utils import documents
+from epo_utils import api
 
 
 class OPSConnection:
@@ -69,8 +67,8 @@ class OPSConnection:
         logging.info('Attempts fetch for: {}'.format(ids_debug_str))
         try:
             response = self.client.fetch(
-                api.Services.Published,
-                api.ReferenceType.Publication,
+                epo_utils.ops.Services.Published,
+                epo_utils.ops.ReferenceType.Publication,
                 list(request_inputs),
                 **kwargs
             )
@@ -147,8 +145,8 @@ class OPSConnection:
         # returns results from the first ID requested. Therefore, one call
         # must be made for each input.
         for request_input in request_inputs:
-            response = self.client.fetch(api.Services.Published,
-                                         api.ReferenceType.Publication,
+            response = self.client.fetch(epo_utils.ops.Services.Published,
+                                         epo_utils.ops.ReferenceType.Publication,
                                          request_input,
                                          endpoint='equivalents')
             soup = BeautifulSoup(response.text, 'lxml')
@@ -158,7 +156,7 @@ class OPSConnection:
                 req_equivalents = [
                     documents.InquiryResult(tag)
                     for tag in inquiry.find_all('ops:inquiry-result')
-                ]
+                    ]
             else:
                 req_equivalents = []
 
@@ -210,7 +208,7 @@ class OPSConnection:
             logging.debug('Fetching start: {}, end: {}'.format(start, end))
 
             # Perform search.
-            if field == api.SearchFields.CQL:
+            if field == epo_utils.ops.SearchFields.CQL:
                 response = self.client.search(query, (start, end),
                                               endpoint=endpoint)
             else:
@@ -254,7 +252,7 @@ class OPSConnection:
 
         if all(isinstance(in_, documents.DocumentID) for in_ in request_input):
             request_input = [api.APIInput.from_document_id(did)
-                              for did in request_input]
+                             for did in request_input]
         elif not all(isinstance(in_, api.APIInput) for in_ in request_input):
             raise ValueError('inputs must be APIInput-instances.')
 
@@ -266,7 +264,7 @@ class OPSConnection:
         # Since OPS-fulltext only supports a few country codes, try to find
         # patent-equivalents from supported countries...
         lacking_fulltext = [in_ for in_ in request_input
-                            if in_.country not in api.HAS_FULLTEXT]
+                            if in_.country not in epo_utils.constants.HAS_FULLTEXT]
 
         # ... Also find patents with correct country codes which lacks
         # full-text anyway.
@@ -279,7 +277,7 @@ class OPSConnection:
         substitutions = dict()
         for input_, equivalents in lacking_fulltext_eqv.items():
             in_correct_country = [eq for eq in equivalents
-                                  if eq.country in api.HAS_FULLTEXT]
+                                  if eq.country in epo_utils.constants.HAS_FULLTEXT]
             has_fulltext = (eq for eq in in_correct_country
                             if self._has_fulltext(eq, 'claims'))
             sub_w_fulltext = next(has_fulltext, None)
@@ -300,8 +298,9 @@ class OPSConnection:
             else:
                 ft_dict, _ = self.get_publication(substitution, endpoint=endpoint)
                 ft_instance = next(val for val in ft_dict.values())
-                results[input_] = Result(api.APIInput.from_document_id(substitution),
-                                         ft_instance)
+                results[input_] = Result(
+                    api.APIInput.from_document_id(substitution),
+                    ft_instance)
 
         return results
 
@@ -318,7 +317,7 @@ class OPSConnection:
         """
         try:
             ft_inquiry_d, _ = self.get_publication(api_input, endpoint='fulltext')
-        except api.FetchFailed:
+        except epo_utils.exceptions.FetchFailed:
             return False
         ft_inquiry = next(val for val in ft_inquiry_d.values())
 
