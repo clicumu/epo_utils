@@ -151,6 +151,10 @@ class EPOClient:
     cache_kwargs : dict, optional.
         Passed to :py:func:`requests_cache.install_cache` as keyword
         arguments if provided.
+    max_retries : int
+        Number of allowed retries at 500-responses.
+    retry_timeout : float, int
+        Timeout in seconds between calls when retrying at 500-responses.
 
     Attributes
     ----------
@@ -163,7 +167,13 @@ class EPOClient:
     HAS_FULLTEXT = {'EP'}
 
     def __init__(self, accept_type='xml', key=None, secret=None, cache=False,
-                 cache_kwargs=None):
+                 cache_kwargs=None, max_retries=1, retry_timeout=10):
+        try:
+            _check_epoclient_input(accept_type, key, secret, cache,
+                                   cache_kwargs, max_retries, retry_timeout)
+        except AssertionError as e:
+            raise ValueError(str(e))
+
         if accept_type.startswith('application/'):
             self.accept_type = accept_type
         else:
@@ -546,3 +556,42 @@ def raise_for_quota_rejection(response):
         # Anonymous user-headers skipped since anonymous use will be
         # discontinued and this package does not support anyways.
         return
+
+
+def _check_epoclient_input(accept_type, key, secret, cache,
+                           cache_kwargs, max_retries, retry_timeout):
+    """ Check input for :class:`EPOClient`.
+
+    Parameters
+    ----------
+    accept_type : str
+        Http accept type.
+    key : str, optional
+        EPO OPS user key.
+    secret : str, optional
+        EPO OPS user secret.
+    cache : bool
+        If True, try to use `requests_cache` for caching. Default False.
+    cache_kwargs : dict, optional.
+        Passed to :py:func:`requests_cache.install_cache` as keyword
+        arguments if provided.
+    max_retries : int
+        Number of allowed retries at 500-responses.
+    retry_timeout : float
+        Timeout in seconds between calls when retrying at 500-responses.
+
+    Raises
+    -------
+    AssertionError
+        If input is bad.
+    """
+    assert isinstance(accept_type, str), 'accept_type must be str'
+    assert isinstance(key, str), 'key must be str'
+    assert isinstance(secret, str), 'secret must be str'
+    assert isinstance(cache, bool), 'cache must be boolean'
+    assert isinstance(cache_kwargs, dict) or cache_kwargs is None, \
+        'cache_kwargs must be dict or None'
+    assert isinstance(max_retries, int) and max_retries >= 0, \
+        'max_retries must be non-negative integer'
+    assert isinstance(retry_timeout, (float, int)) and max_retries >= 0,\
+        'retry_timeout must be non-negative number'
