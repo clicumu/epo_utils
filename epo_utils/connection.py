@@ -3,16 +3,13 @@
 import collections
 import logging
 
-import epo_utils.ops.constants
-import epo_utils.ops.exceptions
 import requests
 from bs4 import BeautifulSoup
 
-import epo_utils.ops
-from epo_utils.exceptions import ResourceNotFound, UnknownDocumentFormat
-
-from epo_utils import documents
-from epo_utils import api
+from .exceptions import ResourceNotFound, UnknownDocumentFormat
+from . import ops
+from . import documents
+from . import api
 
 
 class OPSConnection:
@@ -25,12 +22,12 @@ class OPSConnection:
     secret : str
         Client secret
     **kwargs
-        Keyword arguments passed to :class:`epo_utils.ops.api.EPOClient`-
+        Keyword arguments passed to :class:`epo_utils.api.EPOClient`-
         constructor.
 
     Attributes
     ----------
-    client : epo_utils.ops.api.EPOClient
+    client : epo_utils.api.EPOClient
     """
     def __init__(self, key, secret, **kwargs):
         self.client = api.EPOClient(key=key, secret=secret, **kwargs)
@@ -40,11 +37,11 @@ class OPSConnection:
 
         Parameters
         ----------
-        *request_inputs : epo_utils.ops.api.APIInput, epo_utils.ops.documents.DocumentID
+        *request_inputs : epo_utils.api.APIInput, epo_utils.documents.DocumentID
             One or more api-inputs or document-ID:s to fetch.
         **kwargs
             Keyword arguments passed to
-            :meth:`epo_utils.ops.api.EPOClient.fetch`.
+            :meth:`epo_utils.api.EPOClient.fetch`.
 
         Returns
         -------
@@ -67,8 +64,8 @@ class OPSConnection:
         logging.info('Attempts fetch for: {}'.format(ids_debug_str))
         try:
             response = self.client.fetch(
-                epo_utils.ops.Services.Published,
-                epo_utils.ops.ReferenceType.Publication,
+                ops.Services.Published,
+                ops.ReferenceType.Publication,
                 list(request_inputs),
                 **kwargs
             )
@@ -125,12 +122,12 @@ class OPSConnection:
 
         Parameters
         ----------
-        *request_inputs : epo_utils.ops.api.APIInput, epo_utils.ops.documents.DocumentID
+        *request_inputs : epo_utils.api.APIInput, epo_utils.documents.DocumentID
             One or more api-inputs or document-ID:s to fetch
 
         Returns
         -------
-        dict[epo_utils.ops.api.APIInput, epo_utils.ops.documents.InquiryResult]
+        dict[epo_utils.api.APIInput, epo_utils.documents.InquiryResult]
         requests.Response
         """
         if all(isinstance(in_, documents.DocumentID) for in_ in request_inputs):
@@ -145,8 +142,8 @@ class OPSConnection:
         # returns results from the first ID requested. Therefore, one call
         # must be made for each input.
         for request_input in request_inputs:
-            response = self.client.fetch(epo_utils.ops.Services.Published,
-                                         epo_utils.ops.ReferenceType.Publication,
+            response = self.client.fetch(ops.Services.Published,
+                                         ops.ReferenceType.Publication,
                                          request_input,
                                          endpoint='equivalents')
             soup = BeautifulSoup(response.text, 'lxml')
@@ -208,7 +205,7 @@ class OPSConnection:
             logging.debug('Fetching start: {}, end: {}'.format(start, end))
 
             # Perform search.
-            if field == epo_utils.ops.SearchFields.CQL:
+            if field == ops.SearchFields.CQL:
                 response = self.client.search(query, (start, end),
                                               endpoint=endpoint)
             else:
