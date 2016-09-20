@@ -15,7 +15,8 @@ import requests
 
 from epo_utils.constants import AUTH_URL, URL_PREFIX, VALID_ENDPOINTS, \
     VALID_IDTYPES
-from epo_utils.exceptions import FetchFailed
+from epo_utils.exceptions import FetchFailed, QuotaPerHourExceeded, \
+    QuotaPerWeekExceeded
 from epo_utils.ops import Services, ReferenceType
 
 try:
@@ -250,7 +251,7 @@ class EPOClient:
         try:
             response = self.post('retrieval', url, input_text, headers=headers)
         except requests.HTTPError as e:
-            if e.response.status_code == 404:
+            if e.response.status_code == requests.codes.not_found:
                 logging.error('{} not found'.format(input_text))
                 raise FetchFailed(input_text)
             else:
@@ -413,7 +414,12 @@ class EPOClient:
 
         self._last_call[service] = datetime.now()
         response = request(*args, **kwargs)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as error:
+            if error.response.status_code == requests.codes.forbidden:
+                raise_for_quota_rejection(error.response)
+            raise error  # Non-quota related rejection.
 
         # The OPS-API sets its request-limit by minute, which is updated
         # for each call. Therefore, the throttling delay is set to
@@ -422,7 +428,7 @@ class EPOClient:
         pattern = r'{}=([a-z]+):(\d+)'.format(service)
         color, n_str = re.search(pattern, throttle_header).groups()
         n_per_min = int(n_str)
-        delay = 60 / n_per_min  # Delay in seconds.
+        delay = 60.0 / n_per_min  # Delay in seconds.
         seconds = int(delay)
         milliseconds = int((delay - seconds) * 1e3)
         next_delta = timedelta(seconds=seconds, milliseconds=milliseconds)
@@ -503,3 +509,40 @@ def build_ops_url(service, reference_type=None, id_type=None,
     logging.debug('Built url: {}'.format(url))
     return url
 
+
+def raise_for_quota_rejection(response):
+    """ Check the response for "X-Rejection-Reason"-header and
+    raise if quota exceeded.
+
+    Parameters
+    ----------
+    response : requests.Response
+        Response-object to check.
+
+    Returns
+    -------
+    None
+        If quota isn't exceeded.
+
+    Raises
+    ------
+    QuotaPerWeekExceeded
+        If rejection header is "RegisteredQuotaPerWeek".
+    QuotaPerHourExceeded
+        If rejection header is "IndividualQuotaPerHour"
+    """
+    if response.status_code != requests.codes.forbidden:
+        return
+
+    rejection = response.headers.get('X-Rejection-Reason', None)
+    if rejection is None:
+        return
+
+    if rejection == 'RegisteredQuotaPerWeek':
+        raise QuotaPerWeekExceeded(response.text)
+    elif rejection == 'IndividualQuotaPerHour':
+        raise QuotaPerHourExceeded(response.text)
+    else:
+        # Anonymous user-headers skipped since anonymous use will be
+        # discontinued and this package does not support anyways.
+        return

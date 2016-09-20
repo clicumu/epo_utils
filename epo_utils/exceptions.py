@@ -12,3 +12,11 @@ class ResourceNotFound(Exception):
 
 class UnknownDocumentFormat(Exception):
     """ Raised when an unknown document is encountered. """
+
+
+class QuotaPerHourExceeded(Exception):
+    """ Raised when "X-Rejection-Reason" is "IndividualQuotaPerHour". """
+
+
+class QuotaPerWeekExceeded(Exception):
+    """ Raised when "X-Rejection-Reason" is "RegisteredQuotaPerWeek". """
