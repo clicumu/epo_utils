@@ -13,10 +13,11 @@ from .documents import ExchangeDocument, FullTextDocument, FullTextInquiry, \
 from . import constants
 from .exceptions import FetchFailed, ResourceNotFound, UnknownDocumentFormat
 from . import ops
+from . import tools
 
 __all__ = [OPSConnection, ops, ExchangeDocument, DocumentID, Party,
            FullTextDocument, FullTextInquiry, InquiryResult,
            OPSPublicationReference, PublicationReference, ApplicationReference,
            PriorityClaim, Citation, PatentCitation, NonPatentCitation, constants,
            FetchFailed, ResourceNotFound, UnknownDocumentFormat, EPOClient,
-           APIInput]
+           APIInput, tools]
